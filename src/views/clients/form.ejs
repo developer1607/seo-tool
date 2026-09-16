@@ -1,0 +1,16 @@
+<% if (error) { %>
+  <div class="banner banner-error"><%= error %></div>
+<% } %>
+
+<form class="form" method="post" action="/clients">
+  <label>Name
+    <input name="name" required />
+  </label>
+  <label>Email
+    <input type="email" name="email" required />
+  </label>
+  <label>Temporary password
+    <input type="password" name="password" required minlength="6" />
+  </label>
+  <button class="btn btn-primary" type="submit">Create Client</button>
+</form>

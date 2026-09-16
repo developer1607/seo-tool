@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= title %> · <%= appName %></title>
+  <link rel="stylesheet" href="/public/css/app.css" />
+  <% if (selectedClient) { %>
+  <style>
+    :root {
+      --brand: <%= selectedClient.brand_primary || '#0d7a6f' %>;
+      --brand-soft: color-mix(in srgb, <%= selectedClient.brand_primary || '#0d7a6f' %> 18%, white);
+    }
+  </style>
+  <% } %>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="/"><%= appName %></a>
+      <nav class="nav">
+        <a href="/" class="<%= nav === 'overview' ? 'active' : '' %>">Overview</a>
+        <a href="/platforms/google-ads" class="<%= nav === 'google-ads' ? 'active' : '' %>">Google Ads</a>
+        <a href="/platforms/meta" class="<%= nav === 'meta' ? 'active' : '' %>">Meta Ads</a>
+        <a href="/platforms/ga4" class="<%= nav === 'ga4' ? 'active' : '' %>">GA4</a>
+        <a href="/platforms/gsc" class="<%= nav === 'gsc' ? 'active' : '' %>">Search Console</a>
+        <a href="/integrations" class="<%= nav === 'integrations' ? 'active' : '' %>">Integrations</a>
+        <a href="/reports" class="<%= nav === 'reports' ? 'active' : '' %>">Reports</a>
+        <a href="/clients" class="<%= nav === 'clients' ? 'active' : '' %>">Clients</a>
+        <a href="/settings" class="<%= nav === 'settings' ? 'active' : '' %>">Settings</a>
+      </nav>
+      <div class="sidebar-foot">
+        <%= user ? user.name : '' %><br />Admin
+      </div>
+    </aside>
+    <div class="main-wrap">
+      <header class="topbar">
+        <div style="display:flex;align-items:center;gap:0.5rem;min-width:0;">
+          <button type="button" class="menu-toggle" id="menuToggle" aria-label="Menu">Menu</button>
+          <h1><%= title %></h1>
+        </div>
+        <div class="topbar-actions">
+          <% if (user) { %>
+            <div style="display:flex;align-items:center;gap:0.35rem;">
+              <label class="muted" style="font-size:0.75rem;font-weight:650;">Client</label>
+              <select id="clientSwitcher" aria-label="Switch client" style="min-height:32px;border:1px solid var(--border);border-radius:4px;padding:0.2rem 0.4rem;background:#fff;font:inherit;">
+                <option value="">Select…</option>
+                <% (clients || []).forEach(function (c) { %>
+                  <option value="<%= c.id %>" <%= selectedClient && selectedClient.id === c.id ? 'selected' : '' %>><%= c.name %></option>
+                <% }) %>
+              </select>
+            </div>
+            <% if (selectedClient) { %>
+              <span class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<%= selectedClient.website_url %>">
+                <%= selectedClient.website_url %>
+              </span>
+            <% } %>
+
+            <div class="notif-wrap" id="notifWrap">
+              <button type="button" class="bell" id="notifToggle" aria-label="Notifications" aria-expanded="false" aria-controls="notifPanel" title="Notifications">
+                <svg class="bell-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2Zm6-6V11a6 6 0 1 0-12 0v5l-2 2v1h16v-1l-2-2Z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
+                </svg>
+                <% if (unreadCount > 0) { %>
+                  <span class="badge"><%= unreadCount > 9 ? '9+' : unreadCount %></span>
+                <% } %>
+              </button>
+              <div class="notif-panel" id="notifPanel" hidden role="dialog" aria-label="Notifications">
+                <div class="notif-panel-hd">
+                  <strong>Notifications</strong>
+                  <% if (unreadCount > 0) { %>
+                    <form method="post" action="/notifications/read-all" style="margin:0;">
+                      <input type="hidden" name="return_to" value="" id="notifReturnAll" />
+                      <button class="btn btn-ghost btn-sm" type="submit">Mark all read</button>
+                    </form>
+                  <% } %>
+                </div>
+                <div class="notif-panel-list">
+                  <% const notes = typeof recentNotifications !== 'undefined' && recentNotifications ? recentNotifications : []; %>
+                  <% if (!notes.length) { %>
+                    <div class="notif-empty">No notifications</div>
+                  <% } else { %>
+                    <% notes.forEach(function (n) { %>
+                      <div class="notif-row <%= n.read_at ? '' : 'is-unread' %>">
+                        <div class="notif-row-main">
+                          <div class="notif-title"><%= n.title %></div>
+                          <% if (n.body) { %><div class="notif-body"><%= n.body %></div><% } %>
+                          <div class="notif-meta">
+                            <span class="pill pill-muted"><%= n.layer %></span>
+                            <span><%= n.created_at %></span>
+                          </div>
+                          <% if (n.href) { %>
+                            <a class="notif-link" href="<%= n.href %>">Open</a>
+                          <% } %>
+                        </div>
+                        <% if (!n.read_at) { %>
+                          <form method="post" action="/notifications/<%= n.id %>/read" class="notif-read-form">
+                            <input type="hidden" name="return_to" value="" class="notif-return" />
+                            <button class="btn btn-ghost btn-sm" type="submit" title="Mark read">✓</button>
+                          </form>
+                        <% } %>
+                      </div>
+                    <% }) %>
+                  <% } %>
+                </div>
+              </div>
+            </div>
+
+            <form method="post" action="/logout" style="margin:0;">
+              <button class="btn btn-ghost btn-sm" type="submit">Sign out</button>
+            </form>
+          <% } %>
+        </div>
+      </header>
+      <main class="content">
+        <%- body %>
+      </main>
+    </div>
+  </div>
+  <script>
+    document.getElementById('menuToggle')?.addEventListener('click', () => {
+      document.getElementById('sidebar')?.classList.toggle('open');
+    });
+    document.getElementById('clientSwitcher')?.addEventListener('change', (e) => {
+      const id = e.target.value;
+      if (!id) { window.location = '/clients'; return; }
+      const ret = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location = '/clients/' + id + '/select?return_to=' + ret;
+    });
+
+    (function () {
+      const wrap = document.getElementById('notifWrap');
+      const toggle = document.getElementById('notifToggle');
+      const panel = document.getElementById('notifPanel');
+      if (!wrap || !toggle || !panel) return;
+
+      const here = window.location.pathname + window.location.search;
+      document.querySelectorAll('.notif-return, #notifReturnAll').forEach((el) => {
+        el.value = here;
+      });
+
+      function close() {
+        panel.hidden = true;
+        toggle.setAttribute('aria-expanded', 'false');
+        wrap.classList.remove('is-open');
+      }
+      function open() {
+        panel.hidden = false;
+        toggle.setAttribute('aria-expanded', 'true');
+        wrap.classList.add('is-open');
+      }
+
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (panel.hidden) open();
+        else close();
+      });
+      document.addEventListener('click', (e) => {
+        if (!wrap.contains(e.target)) close();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') close();
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# 01-google-identity
+
+**Label:** Multi-account Google / Meta identity research.
+
+- [MULTI_GOOGLE_ACCOUNTS.md](./MULTI_GOOGLE_ACCOUNTS.md)
+- [STANDARDS_MULTI_GOOGLE_PLAN.md](./STANDARDS_MULTI_GOOGLE_PLAN.md)
+- [DATA_LIFECYCLE_MULTI_EMAIL.md](./DATA_LIFECYCLE_MULTI_EMAIL.md)
+- [GOOGLE_ACCOUNTS_UX.md](./GOOGLE_ACCOUNTS_UX.md)
+
+Up: [../README.md](../README.md)

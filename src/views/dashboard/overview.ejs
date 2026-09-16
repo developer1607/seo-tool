@@ -1,0 +1,81 @@
+<%
+function delta(cur, prev) {
+  const c = Number(cur) || 0;
+  const p = Number(prev) || 0;
+  const abs = c - p;
+  let pct = null;
+  if (p !== 0) pct = (abs / Math.abs(p)) * 100;
+  else if (c !== 0) pct = 100;
+  return { abs, pct, up: abs > 0, down: abs < 0 };
+}
+function fmtDelta(d) {
+  if (d.pct === null) return '—';
+  const sign = d.abs > 0 ? '+' : '';
+  return sign + d.pct.toFixed(1) + '%';
+}
+%>
+
+<% if (typeof alerts !== 'undefined' && alerts.length) { %>
+  <% alerts.forEach(function (a) { %>
+    <div class="banner banner-<%= a.severity === 'error' ? 'error' : 'warn' %>">
+      <strong><%= a.title %></strong>
+      <% if (a.href) { %> — <a href="<%= a.href %>">Open</a><% } %>
+    </div>
+  <% }) %>
+<% } %>
+
+<%- include('../partials/datebar') %>
+
+<div class="kpi-strip">
+  <%
+    const items = [
+      { label: 'Organic clicks', cur: kpis.organic_clicks, prev: compare.organic_clicks },
+      { label: 'Sessions', cur: kpis.sessions, prev: compare.sessions },
+      { label: 'Ad spend', cur: kpis.spend, prev: compare.spend },
+      { label: 'Clicks', cur: kpis.clicks, prev: compare.clicks },
+      { label: 'Conversions', cur: kpis.primary_conversions, prev: compare.primary_conversions },
+    ];
+    items.forEach(function (it) {
+      const d = delta(it.cur, it.prev);
+  %>
+    <div class="kpi">
+      <div class="label"><%= it.label %></div>
+      <div class="value"><%= typeof it.cur === 'number' && !Number.isInteger(it.cur) ? Number(it.cur).toFixed(0) : it.cur %></div>
+      <div class="sub" style="color:<%= d.up ? 'var(--success)' : (d.down ? 'var(--danger)' : 'var(--muted)') %>">
+        <%= fmtDelta(d) %> vs prior
+      </div>
+    </div>
+  <% }) %>
+</div>
+
+<div class="panel">
+  <div class="panel-hd">Platform status</div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Source</th><th>Status</th><th>Account</th><th>Last sync</th><th></th></tr>
+      </thead>
+      <tbody>
+        <% platforms.forEach(function (p) { %>
+          <tr>
+            <td><strong><%= p.label %></strong></td>
+            <td>
+              <span class="pill <%= p.status === 'ACTIVE' ? 'pill-ok' : (p.status === 'ERROR' || p.status === 'NEEDS_REAUTH' ? 'pill-err' : 'pill-muted') %>">
+                <%= p.status.replace(/_/g, ' ') %>
+              </span>
+            </td>
+            <td class="muted"><%= p.account_name || '—' %></td>
+            <td class="muted"><%= p.last_sync_at || '—' %></td>
+            <td>
+              <% if (p.status !== 'ACTIVE') { %>
+                <a class="btn btn-ghost btn-sm" href="/integrations">Connect</a>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<p class="muted">KPIs fill after Integrations sync for <%= selectedClient.name %>. Partial source failures still show other platforms.</p>

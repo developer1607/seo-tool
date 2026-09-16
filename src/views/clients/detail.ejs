@@ -1,0 +1,71 @@
+<div class="page-toolbar">
+  <span class="hint"><%= client.email %></span>
+  <a class="btn btn-ghost btn-sm" href="/clients">Back to clients</a>
+</div>
+
+<div class="layout-split">
+  <div class="panel">
+    <div class="panel-hd">
+      <span>Websites</span>
+      <span class="muted"><%= websites.length %></span>
+    </div>
+    <div class="table-wrap">
+      <% if (!websites.length) { %>
+        <div class="empty">No websites for this client.</div>
+      <% } else { %>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Website</th>
+              <th>Domain</th>
+              <th>Onboarding</th>
+              <th>Connected</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <% websites.forEach(function (w) { %>
+              <tr>
+                <td><a class="row-link" href="/websites/<%= w.id %>"><%= w.name %></a></td>
+                <td class="muted"><%= w.domain %></td>
+                <td>
+                  <span class="pill <%= w.onboarding_status === 'COMPLETE' ? 'pill-ok' : 'pill-warn' %>">
+                    <%= w.onboarding_status || 'DRAFT' %>
+                  </span>
+                </td>
+                <td><%= w.active_connections %></td>
+                <td><a class="btn btn-ghost btn-sm" href="/websites/<%= w.id %>">Open</a></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      <% } %>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-hd">Quick add website</div>
+    <div class="panel-bd">
+      <form class="form" method="post" action="/websites">
+        <input type="hidden" name="client_id" value="<%= client.id %>" />
+        <div class="form-grid">
+          <label>Name
+            <input name="name" required />
+          </label>
+          <label>Domain
+            <input name="domain" placeholder="https://example.com" required />
+          </label>
+          <label>Timezone
+            <input name="timezone" value="Asia/Kolkata" />
+          </label>
+          <label>Currency
+            <input name="currency" value="INR" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary btn-sm" type="submit">Add website</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

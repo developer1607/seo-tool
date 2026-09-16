@@ -1,0 +1,8 @@
+<nav class="tabs" aria-label="Website">
+  <a href="/websites/<%= website.id %>" class="<%= tab === 'overview' ? 'active' : '' %>">Overview</a>
+  <a href="/websites/<%= website.id %>/performance" class="<%= tab === 'performance' ? 'active' : '' %>">Performance</a>
+  <a href="/websites/<%= website.id %>/onboarding" class="<%= tab === 'onboarding' ? 'active' : '' %>">Onboarding</a>
+  <a href="/websites/<%= website.id %>/integrations" class="<%= tab === 'integrations' ? 'active' : '' %>">Integrations</a>
+  <a href="/websites/<%= website.id %>/reports" class="<%= tab === 'reports' ? 'active' : '' %>">Reports</a>
+</nav>
+<p class="site-meta"><%= website.domain %></p>

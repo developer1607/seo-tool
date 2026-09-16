@@ -1,0 +1,52 @@
+<%- include('tabs') %>
+
+<div class="page-toolbar">
+  <span class="hint">OAuth uses platform app credentials; tokens stay per website.</span>
+  <a class="btn btn-ghost btn-sm" href="/websites/<%= website.id %>/onboarding">Edit mapping</a>
+</div>
+
+<div class="panel">
+  <div class="panel-hd">Providers</div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Provider</th>
+          <th>Status</th>
+          <th>Account</th>
+          <th>Last sync</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% data.providers.forEach(function (p) { %>
+          <tr>
+            <td>
+              <strong><%= p.label %></strong>
+              <% if (p.phase > 0) { %><span class="muted"> · Phase <%= p.phase %></span><% } %>
+            </td>
+            <td>
+              <span class="pill <%= p.status === 'ACTIVE' ? 'pill-ok' : (p.status === 'COMING_SOON' || p.status === 'NOT_STARTED' ? 'pill-muted' : (p.status === 'ERROR' || p.status === 'NEEDS_REAUTH' ? 'pill-err' : 'pill-warn')) %>">
+                <%= p.status.replace(/_/g, ' ') %>
+              </span>
+            </td>
+            <td class="muted"><%= p.account_name || '—' %></td>
+            <td class="muted"><%= p.last_sync_at || '—' %></td>
+            <td>
+              <% if (p.actions.includes('connect') || p.actions.includes('reconnect')) { %>
+                <button class="btn btn-primary btn-sm" type="button" disabled title="OAuth next">Connect</button>
+              <% } else if (p.status === 'COMING_SOON') { %>
+                <span class="muted">Soon</span>
+              <% } else if (p.actions.includes('sync')) { %>
+                <button class="btn btn-ghost btn-sm" type="button" disabled>Sync</button>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+<% data.providers.filter(function (p) { return p.last_error; }).forEach(function (p) { %>
+  <div class="banner banner-error"><%= p.label %>: <%= p.last_error %></div>
+<% }) %>

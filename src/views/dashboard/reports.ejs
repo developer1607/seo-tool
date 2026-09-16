@@ -1,0 +1,44 @@
+<%- include('../partials/datebar') %>
+
+<div class="layout-split">
+  <div class="panel">
+    <div class="panel-hd">
+      <span>Saved reports</span>
+      <span class="muted"><%= reports.length %></span>
+    </div>
+    <div class="table-wrap">
+      <% if (!reports.length) { %>
+        <div class="empty">No saved reports yet. Generate after data sync (FR-020).</div>
+      <% } else { %>
+        <table class="table">
+          <thead>
+            <tr><th>Title</th><th>Range</th><th>Created</th><th></th></tr>
+          </thead>
+          <tbody>
+            <% reports.forEach(function (r) { %>
+              <tr>
+                <td><strong><%= r.title %></strong></td>
+                <td class="muted"><%= r.range_from %> → <%= r.range_to %></td>
+                <td class="muted"><%= r.created_at %></td>
+                <td><span class="muted">View / PDF / Share soon</span></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      <% } %>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-hd">Generate</div>
+    <div class="panel-bd">
+      <p class="muted">Uses <%= selectedClient.name %> branding, current range, and AI summary (editable) — FR-024–031.</p>
+      <div class="form-actions">
+        <button class="btn btn-primary btn-sm" type="button" disabled>Generate report</button>
+        <button class="btn btn-ghost btn-sm" type="button" disabled>Export PDF</button>
+        <button class="btn btn-ghost btn-sm" type="button" disabled>Copy share link</button>
+      </div>
+      <p class="muted" style="margin-top:0.65rem;">Share link is for Email / WhatsApp (not WhatsApp API in Phase 1).</p>
+    </div>
+  </div>
+</div>

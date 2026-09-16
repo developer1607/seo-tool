@@ -1,0 +1,82 @@
+<% if (needSelect) { %>
+  <div class="banner banner-warn">Select a client to open the dashboard.</div>
+<% } %>
+<% if (error) { %>
+  <div class="banner banner-error"><%= error %></div>
+<% } %>
+
+<div class="layout-split">
+  <div class="panel">
+    <div class="panel-hd">
+      <span>Clients</span>
+      <span class="muted"><%= clients.length %></span>
+    </div>
+    <div class="table-wrap">
+      <% if (!clients.length) { %>
+        <div class="empty">Add a client to start.</div>
+      <% } else { %>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Website</th>
+              <th>Brand</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <% clients.forEach(function (c) { %>
+              <tr>
+                <td><strong><%= c.name %></strong></td>
+                <td class="muted"><%= c.website_url %></td>
+                <td>
+                  <span style="display:inline-block;width:14px;height:14px;border-radius:2px;background:<%= c.brand_primary %>;border:1px solid var(--border);vertical-align:middle;"></span>
+                </td>
+                <td style="white-space:nowrap;">
+                  <a class="btn btn-primary btn-sm" href="/clients/<%= c.id %>/select">Open</a>
+                  <a class="btn btn-ghost btn-sm" href="/clients/<%= c.id %>/edit">Edit</a>
+                  <form method="post" action="/clients/<%= c.id %>/delete" style="display:inline;" onsubmit="return confirm('Delete this client and all connected data?');">
+                    <button class="btn btn-ghost btn-sm" type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      <% } %>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-hd"><%= edit ? 'Edit client' : 'Add client' %></div>
+    <div class="panel-bd">
+      <form class="form" method="post" action="<%= edit ? '/clients/' + edit.id : '/clients' %>">
+        <div class="form-grid cols-2">
+          <label>Client name
+            <input name="name" required value="<%= edit ? edit.name : '' %>" />
+          </label>
+          <label>Website URL
+            <input name="website_url" required placeholder="https://" value="<%= edit ? edit.website_url : '' %>" />
+          </label>
+          <label>Brand primary
+            <input type="color" name="brand_primary" value="<%= edit ? edit.brand_primary : '#0d7a6f' %>" />
+          </label>
+          <label>Brand secondary
+            <input type="color" name="brand_secondary" value="<%= edit ? edit.brand_secondary : '#1e2530' %>" />
+          </label>
+          <label>Timezone
+            <input name="timezone" value="<%= edit ? edit.timezone : 'Asia/Kolkata' %>" />
+          </label>
+          <label>Currency
+            <input name="currency" value="<%= edit ? edit.currency : 'INR' %>" />
+          </label>
+        </div>
+        <p class="muted">Logo upload next (FR-016). Colors apply to selected-client chrome.</p>
+        <div class="form-actions">
+          <button class="btn btn-primary btn-sm" type="submit"><%= edit ? 'Save' : 'Create' %></button>
+          <% if (edit) { %><a class="btn btn-ghost btn-sm" href="/clients">Cancel</a><% } %>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

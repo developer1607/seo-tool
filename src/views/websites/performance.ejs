@@ -1,0 +1,57 @@
+<%- include('tabs') %>
+
+<div class="page-toolbar">
+  <span class="hint"><%= data.range_label %></span>
+</div>
+
+<div class="panel">
+  <div class="panel-hd">Channels</div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Channel</th>
+          <th>Status</th>
+          <th>Clicks / sessions</th>
+          <th>Impressions</th>
+          <th>Spend</th>
+          <th>Conv.</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% data.channels.forEach(function (ch) { %>
+          <tr>
+            <td><strong><%= ch.label %></strong></td>
+            <td>
+              <span class="pill <%= ch.status === 'ACTIVE' ? 'pill-ok' : 'pill-muted' %>"><%= ch.status %></span>
+            </td>
+            <td class="muted">
+              <% if (ch.key === 'GOOGLE_ORGANIC') { %>
+                <%= ch.metrics.clicks %> clicks · <%= ch.metrics.sessions %> sessions
+              <% } else { %>
+                <%= ch.metrics.clicks %> clicks
+              <% } %>
+            </td>
+            <td class="muted"><%= ch.metrics.impressions || 0 %></td>
+            <td class="muted"><%= ch.metrics.spend != null ? Number(ch.metrics.spend).toFixed(0) : '—' %></td>
+            <td class="muted"><%= ch.metrics.primary_conversions || 0 %></td>
+            <td>
+              <% if (ch.status !== 'ACTIVE') { %>
+                <a class="btn btn-ghost btn-sm" href="/websites/<%= website.id %>/integrations">Connect</a>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+        <% data.hidden_channels.forEach(function (h) { %>
+          <tr>
+            <td><strong><%= h.label %></strong></td>
+            <td><span class="pill pill-muted">Phase 1</span></td>
+            <td colspan="4" class="muted"><%= h.reason %></td>
+            <td></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>

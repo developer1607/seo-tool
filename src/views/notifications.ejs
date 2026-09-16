@@ -1,0 +1,41 @@
+<div class="page-toolbar">
+  <span class="hint">Platform and client alerts</span>
+  <form method="post" action="/notifications/read-all" style="margin:0;">
+    <input type="hidden" name="return_to" value="/notifications" />
+    <button class="btn btn-ghost btn-sm" type="submit">Mark all read</button>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-hd">Inbox</div>
+  <div class="table-wrap">
+    <% if (!items.length) { %>
+      <div class="empty">No alerts.</div>
+    <% } else { %>
+      <table class="table">
+        <thead><tr><th>Layer</th><th>Title</th><th>When</th><th></th></tr></thead>
+        <tbody>
+          <% items.forEach(function (n) { %>
+            <tr style="<%= n.read_at ? '' : 'background:#f4fbfa;' %>">
+              <td><span class="pill pill-muted"><%= n.layer %></span></td>
+              <td>
+                <strong><%= n.title %></strong>
+                <% if (n.body) { %><div class="muted"><%= n.body %></div><% } %>
+                <% if (n.href) { %><a href="<%= n.href %>">Open</a><% } %>
+              </td>
+              <td class="muted"><%= n.created_at %></td>
+              <td>
+                <% if (!n.read_at) { %>
+                  <form method="post" action="/notifications/<%= n.id %>/read">
+                    <input type="hidden" name="return_to" value="/notifications" />
+                    <button class="btn btn-ghost btn-sm" type="submit">Read</button>
+                  </form>
+                <% } %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    <% } %>
+  </div>
+</div>

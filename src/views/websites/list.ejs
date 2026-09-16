@@ -1,0 +1,82 @@
+<div class="layout-split">
+  <div class="panel">
+    <div class="panel-hd">
+      <span>Websites</span>
+      <span class="muted"><%= websites.length %> total</span>
+    </div>
+    <div class="table-wrap">
+      <% if (!websites.length) { %>
+        <div class="empty">No websites yet — add one beside this list.</div>
+      <% } else { %>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Website</th>
+              <% if (user.role === 'ADMIN') { %><th>Client</th><% } %>
+              <th>Domain</th>
+              <th>Setup</th>
+              <th>Connected</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <% websites.forEach(function (w) { %>
+              <tr>
+                <td><a class="row-link" href="/websites/<%= w.id %>"><%= w.name %></a></td>
+                <% if (user.role === 'ADMIN') { %>
+                  <td class="muted"><%= w.client_name || '—' %></td>
+                <% } %>
+                <td class="muted"><%= w.domain %></td>
+                <td>
+                  <span class="pill <%= w.onboarding_status === 'COMPLETE' ? 'pill-ok' : 'pill-warn' %>">
+                    <%= w.onboarding_status || 'DRAFT' %>
+                  </span>
+                </td>
+                <td><%= w.active_connections %></td>
+                <td><a class="btn btn-ghost btn-sm" href="/websites/<%= w.id %>">Open</a></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      <% } %>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-hd">Add website</div>
+    <div class="panel-bd">
+      <% if (typeof error !== 'undefined' && error) { %>
+        <div class="banner banner-error" style="margin-bottom:0.65rem;"><%= error %></div>
+      <% } %>
+      <form class="form" method="post" action="/websites">
+        <div class="form-grid">
+          <% if (user.role === 'ADMIN') { %>
+            <label class="span-2">Client
+              <select name="client_id" required>
+                <option value="">Select…</option>
+                <% (clients || []).forEach(function (c) { %>
+                  <option value="<%= c.id %>" <%= String(selectedClientId || '') === String(c.id) ? 'selected' : '' %>><%= c.name %></option>
+                <% }) %>
+              </select>
+            </label>
+          <% } %>
+          <label>Name
+            <input name="name" required />
+          </label>
+          <label>Domain
+            <input name="domain" placeholder="https://example.com" required />
+          </label>
+          <label>Timezone
+            <input name="timezone" value="Asia/Kolkata" />
+          </label>
+          <label>Currency
+            <input name="currency" value="INR" />
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="btn btn-primary btn-sm" type="submit">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

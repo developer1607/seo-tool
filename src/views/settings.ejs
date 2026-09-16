@@ -1,0 +1,32 @@
+<div class="layout-split">
+  <div class="panel">
+    <div class="panel-hd">Admin</div>
+    <div class="panel-bd">
+      <table class="table">
+        <tbody>
+          <tr><th style="width:120px;">Name</th><td><%= user.name %></td></tr>
+          <tr><th>Email</th><td><%= user.email %></td></tr>
+          <tr><th>Role</th><td>ADMIN</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-hd">Platform OAuth apps</div>
+    <div class="panel-bd">
+      <table class="table">
+        <tbody>
+          <tr>
+            <th style="width:120px;">Google</th>
+            <td><span class="pill <%= platform.google ? 'pill-ok' : 'pill-warn' %>"><%= platform.google ? 'Configured' : 'Missing env' %></span></td>
+          </tr>
+          <tr>
+            <th>Meta</th>
+            <td><span class="pill <%= platform.meta ? 'pill-ok' : 'pill-warn' %>"><%= platform.meta ? 'Configured' : 'Missing env' %></span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:0.65rem;">One Google/Meta app in .env. Per-client tokens on Connections.</p>
+    </div>
+  </div>
+</div>

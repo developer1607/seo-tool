@@ -1,0 +1,64 @@
+<%- include('tabs') %>
+
+<% if (saved) { %>
+  <div class="banner banner-success">Draft saved.</div>
+<% } %>
+
+<%
+  const channels = JSON.parse(onboarding.channels_json || '[]');
+  const ga4 = JSON.parse(onboarding.ga4_key_events_json || '[]').join(', ');
+  const meta = JSON.parse(onboarding.meta_action_types_json || '[]').join(', ');
+%>
+
+<div class="panel">
+  <div class="panel-hd">
+    <span>What to measure</span>
+    <span class="pill <%= onboarding.status === 'COMPLETE' ? 'pill-ok' : 'pill-warn' %>"><%= onboarding.status %></span>
+  </div>
+  <div class="panel-bd">
+    <form class="form" method="post" action="/websites/<%= website.id %>/onboarding">
+      <div class="form-grid cols-2">
+        <label>Primary goal
+          <select name="goal_primary">
+            <% ['LEADS','ECOMMERCE','TRAFFIC','BRAND','OTHER'].forEach(function (g) { %>
+              <option value="<%= g %>" <%= onboarding.goal_primary === g ? 'selected' : '' %>><%= g %></option>
+            <% }) %>
+          </select>
+        </label>
+        <label>Value mode
+          <select name="value_mode">
+            <% ['NONE','EVENT','REVENUE'].forEach(function (v) { %>
+              <option value="<%= v %>" <%= onboarding.value_mode === v ? 'selected' : '' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </label>
+
+        <div class="span-2 field">
+          <span>Channels</span>
+          <div class="check-row" style="margin-top:0.35rem;">
+            <% [['GSC','Google Search'],['GA4','Google Analytics'],['META_ADS','Meta Ads']].forEach(function (pair) { %>
+              <label>
+                <input type="checkbox" name="channels" value="<%= pair[0] %>" <%= channels.includes(pair[0]) ? 'checked' : '' %> />
+                <%= pair[1] %>
+              </label>
+            <% }) %>
+          </div>
+        </div>
+
+        <label>Conversion label
+          <input name="conversion_label" value="<%= onboarding.conversion_label || '' %>" placeholder="Lead form / Purchase" />
+        </label>
+        <label>GA4 key events
+          <input name="ga4_key_events" value="<%= ga4 %>" placeholder="generate_lead, purchase" />
+        </label>
+        <label class="span-2">Meta action_type values
+          <input name="meta_action_types" value="<%= meta %>" placeholder="lead, purchase" />
+        </label>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-ghost btn-sm" type="submit" name="complete" value="0">Save draft</button>
+        <button class="btn btn-primary btn-sm" type="submit" name="complete" value="1">Save &amp; go to integrations</button>
+      </div>
+    </form>
+  </div>
+</div>

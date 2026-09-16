@@ -1,0 +1,19 @@
+<form class="panel" method="get" action="" style="margin:0;">
+  <div class="panel-bd" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:end;">
+    <label class="field" style="min-width:140px;">Range
+      <select name="preset" onchange="this.form.requestSubmit()">
+        <% presets.forEach(function (p) { %>
+          <option value="<%= p.id %>" <%= range.preset === p.id ? 'selected' : '' %>><%= p.label %></option>
+        <% }) %>
+      </select>
+    </label>
+    <label class="field">From
+      <input type="date" name="from" value="<%= range.from %>" />
+    </label>
+    <label class="field">To
+      <input type="date" name="to" value="<%= range.to %>" />
+    </label>
+    <button class="btn btn-primary btn-sm" type="submit" onclick="this.form.preset.value='custom'">Apply</button>
+    <span class="muted">vs <%= range.compareFrom %> → <%= range.compareTo %></span>
+  </div>
+</form>
