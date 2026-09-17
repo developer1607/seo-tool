@@ -1,7 +1,9 @@
 # Delivery phases — Webastral
 
 Aligned to `docs/01-core/02-requirements/SRS.md` and `docs/01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md`.  
-**Checklist updated:** 2026-09-16
+**Checklist updated:** 2026-09-17  
+
+**Data:** local PostgreSQL via `DATABASE_URL` (`db/schema.postgres.sql`). See `DOC_AND_PG_EVAL-2026-09-17.md`. Prod Postgres still pending.
 
 ## Account / Integrations track (Cursor-style)
 
@@ -11,7 +13,7 @@ Aligned to `docs/01-core/02-requirements/SRS.md` and `docs/01-core/01-shipping/A
 | A Portal SSO (password + Continue with Google) | Done |
 | B Integrations hub | Done |
 | C Multi Google/Meta data identities | Done |
-| D Meta Ads connect | Code done — Meta `.env` + App Review pending |
+| D Meta Ads connect | Dev Connect works (scopes fixed 2026-09-16) — App Review / external BMs pending |
 | E Polish + cron Sync | Pending |
 
 Master checklist: `docs/01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md` (top of file).

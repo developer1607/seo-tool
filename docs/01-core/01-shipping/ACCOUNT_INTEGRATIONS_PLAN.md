@@ -1,11 +1,11 @@
 # Account → Integrations plan (Cursor-style)
 
-**Status:** In progress — Phases 0 / A / B / C shipped; D code ready (ops); E pending  
-**Updated:** 2026-09-16  
+**Status:** In progress — Phases 0 / A / B / C shipped; **Phase D Meta Connect works in Dev** (scopes fixed); App Review / external BMs still open; E pending; **local Postgres cutover shipped**; **2026-09-17 docs + PG eval** (`DOC_AND_PG_EVAL-2026-09-17.md`)  
+**Updated:** 2026-09-17  
 **Product:** Webastral — admin-only agency SEO/reporting  
 **Goal:** Feel like Cursor: create/sign in to an account, then connect Google / Meta under **Integrations** — without confusing app login with data OAuth.
 
-Related docs: `DEV_LOGBOOK.md`, `PHASES.md`, `../02-requirements/SRS.md`, `../03-product-ux/NAVIGATION.md`, `../03-product-ux/IA.md`, `../04-integrations/STANDARD_GOOGLE_ACCESS_REVOKED.md`, `../../02-product-plans/01-google-identity/`, `../../04-audits-archive/02-portal-audits/`.
+Related docs: `DEV_LOGBOOK.md`, `PHASES.md`, `DOC_AND_PG_EVAL-2026-09-17.md`, `../02-requirements/SRS.md`, `../03-product-ux/NAVIGATION.md`, `../03-product-ux/IA.md`, `../04-integrations/STANDARD_GOOGLE_ACCESS_REVOKED.md`, `../../02-product-plans/01-google-identity/`, `../../04-audits-archive/02-portal-audits/`.
 
 ---
 
@@ -33,17 +33,20 @@ Related docs: `DEV_LOGBOOK.md`, `PHASES.md`, `../02-requirements/SRS.md`, `../03
 - [x] **Client-facing report copy** - recommendations / summary / empty sections speak to the client (no internal roadmap / Phase language)
 - [x] **Brand rename** - Astralytics ? **Webastral** (UI, reports, API messages, core docs); session cookie `webastral_session`
 - [x] **Dev logbook** - `docs/01-core/01-shipping/DEV_LOGBOOK.md` day log + `/replicate-webastral` command for other Cursor profiles
+- [x] **Bulk import on Google integrate** - `POST /integrations/google/import-bulk`; Integrations → Google Import → Import all / selected (GA4+GSC); hostname attach; Ads stay per-website
+- [x] **Alpha test pack (2026-09-16)** - multi-agent report `docs/03-qa/01-alpha/ALPHA_TEST-2026-09-16.md`; `/health`; bulk cap 80; report brand sanitize + print colours
+- [x] **PostgreSQL cutover (local)** - API uses `DATABASE_URL` + `db/schema.postgres.sql`; sync `pg` adapter; `npm run db:pg:start` (embedded UTF-8, port 5434, no Docker); `db:init` / `db:verify` / `db:migrate-sqlite`; legacy `db/app.sqlite` kept as backup; data migrated (clients + snapshots)
+- [x] **Mobile nav drawer** - hamburger + full sidebar/subnav at ≤760px
+- [x] **Meta Connect scopes (Dev)** - Login for Business OAuth uses `ads_read` + `business_management` only (dropped `email` / `public_profile`); `/me` = `id,name`; Connect works in Development for reports
 
 ### Pending - not ready / not done
 
-- [x] **Bulk import on Google integrate** - `POST /integrations/google/import-bulk`; Integrations ? Google - Import ? Import all / selected (GA4+GSC); hostname attach; Ads stay per-website
-- [x] **Alpha test pack (2026-09-16)** - multi-agent report `docs/03-qa/01-alpha/ALPHA_TEST-2026-09-16.md`; `/health`; bulk cap 80; report brand sanitize + print colours
+- [ ] **Postgres prod / free deploy** - persistent managed Postgres (or durable volume for `DATABASE_URL`) before public URL; not embedded-only (`data/pg-utf8` is local-only)
+- [~] **Postgres SQL audit (full product smoke)** - API `smoke:pg` **23/23** on 2026-09-17; browser Login → Agency → Overview → PDF still unchecked; app SQL still uses `datetime('now')` rewritten by `pg-adapter.js`
 - [ ] **On-visit Sync** - when opening Overview / GA4 / GSC / Ads / Meta, refresh stale linked sources without relying only on header Sync
-- [x] **Mobile nav drawer** - hamburger + full sidebar/subnav at =760px
-- [ ] **Free deploy volume** - persistent disk for `db/app.sqlite` before public URL
 - [ ] **Agency vs Clients content** - clarify portfolio ops vs research/list under the new shell
 - [ ] **Nightly / cron Sync** - still manual header Sync (deferred; on-visit Sync may cover day-to-day)
-- [ ] **Phase D ops** - `META_APP_ID` / `SECRET` in `.env` + Meta Developer Console redirect + App Review / Business Verification for external BMs
+- [ ] **Phase D ops** - App Review / Business Verification / Tech Provider for external BMs; Meta Connect already works in **Development** with corrected scopes
 - [ ] **Phase E polish** - password reset, login rate limit, staging vs prod OAuth clients
 - [ ] **Google production verification** - sensitive-scope demo / verification for production client scale
 - [ ] **Client / freelancer portal login** - still admin-only
@@ -53,17 +56,16 @@ Related docs: `DEV_LOGBOOK.md`, `PHASES.md`, `../02-requirements/SRS.md`, `../03
 
 ### Smoke before calling -done for the day-
 
-- [ ] Login password **or** Continue with Google (`searcheno1@gmail.com`) ? lands on **Agency** (re-login once after Webastral cookie rename)
+- [x] `npm run db:pg:start` + `npm run db:verify` + API `/api/health` → `db: up` (verified 2026-09-17; `smoke:pg` 23/23)
+- [ ] Login password **or** Continue with Google (`searcheno1@gmail.com`) → lands on **Agency** (no SQL errors) — API must be running; UI-only `web/` proxies to :4000 and fails with ECONNREFUSED
 - [ ] Brand shows **Webastral** (sidebar / login / report footer)
-- [ ] Integrations ? Connect / Reconnect Google ? Sync accounts ? Import or Link one property
+- [ ] Integrations → Connect / Reconnect Google → Sync accounts → Import or Link one property
 - [ ] Overview shows report-style sections; header Sync refreshes (honest skip / reconnect messages)
-- [ ] Open GA4 / GSC platform page ? charts + daily table load
-- [ ] Open or regenerate a report ? client-facing recommendations ? sections 1-N ? **Export PDF** ? Save as PDF
-- [ ] (Optional) Revoked Google path ? -Access revoked- banner ? Remove client or Reconnect
-- [ ] (Optional) **Add Google account** ? second Gmail ? Import under that chip
-- [ ] (Optional) Meta Connect when `.env` Meta keys are set
-
----
+- [ ] Open GA4 / GSC platform page → charts + daily table load
+- [ ] Open or regenerate a report → client-facing recommendations → sections 1-N → **Export PDF** → Save as PDF
+- [ ] (Optional) Revoked Google path → Access revoked banner → Remove client or Reconnect
+- [ ] (Optional) **Add Google account** → second Gmail → Import under that chip
+- [ ] (Optional) Meta Connect when `.env` Meta keys are set — expect no Invalid Scopes (`ads_read` + `business_management` only)
 
 ## 1. What you asked for
 
@@ -280,19 +282,20 @@ Rules:
 
 ### Phase D - Meta / Facebook integrate (longest calendar)
 
-**Status: code shipped (2026-09-14)** - **ops / App Review still pending** for production clients.
+**Status: Connect works in Development (2026-09-16 scopes)** — **App Review / Business Verification** still pending for external client BMs.
 
 **Ship (product)**
 
 - [x] Meta card on Integrations: Connect / Reconnect / Disconnect.
-- [x] List ad accounts; **link to website**; Sync insights ? `META_ADS` snapshots.
+- [x] List ad accounts; **link to website**; Sync insights → `META_ADS` snapshots.
 - [x] `/platforms/meta` live when linked.
+- [x] Dev OAuth scopes fixed: `ads_read` + `business_management` only (no consumer `email` / `public_profile`).
 
 **Still required from operator**
 
-- [ ] `META_APP_ID` / `META_APP_SECRET` / redirect URI in Meta Developer Console.
+- [ ] Confirm Meta App **Site URL** / redirect = `http://localhost:3000/...` for local Dev.
 - [ ] App Review / Business Verification / Tech Provider for external client BMs.
-
+- [ ] Add `ads_management` only when create-ads UI ships.
 ---
 
 ### Phase E - Polish

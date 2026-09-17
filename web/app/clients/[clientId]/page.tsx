@@ -313,7 +313,7 @@ export default function ClientDetailsPage() {
                 accounts
               </p>
             </div>
-            <Link className="text-button" href="/integrations?tab=google">
+            <Link className="text-button" href="/integrations?tab=accounts&view=google">
               Google accounts →
             </Link>
           </div>
@@ -440,7 +440,7 @@ export default function ClientDetailsPage() {
               </Link>
               <Link
                 className="secondary-button"
-                href="/integrations?tab=google"
+                href="/integrations?tab=accounts&view=google"
                 style={{ marginLeft: 8 }}
               >
                 Discover from Google

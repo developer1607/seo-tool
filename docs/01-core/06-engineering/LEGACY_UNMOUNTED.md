@@ -1,18 +1,20 @@
 # Legacy / unmounted code (do not mount)
 
-`src/index.js` mounts only `routes/google` and `routes/api`.
+`src/index.js` mounts only `routes/google`, `routes/meta`, and `routes/api`.
 
-These files are **not** in the live request path and contradict Admin-only schema
-(`CLIENT` role, `website_onboarding`, `client_invites`, EJS `res.render`):
+These files are **not** in the live request path (EJS `res.render` / old HTML routers):
 
 - `src/routes/auth.js`
 - `src/routes/clients.js`
-- `src/routes/websites.js`
+- `src/routes/websites.js` (this is where `website_onboarding` HTML lived)
 - `src/routes/overview.js`
 - `src/routes/dashboard.js`
 - `src/routes/misc.js`
 - `src/routes/notifications.js`
-- `src/lib/invites.js`
-- `src/lib/metrics/views.js`
+- `src/lib/invites.js` (`client_invites` — table exists in Postgres, 0 rows, unused)
 
-Do not wire them without a full rewrite against `db/schema.sql`.
+**Live (do not treat as legacy):** `src/lib/metrics/views.js` — used by `src/routes/api.js` for `/api/agency/overview` and client overview.
+
+`website_onboarding` and `client_invites` exist in `db/schema.postgres.sql` for the unmounted EJS flow. The Next UI does not write onboarding rows. Empty tables after SQLite → PG copy are expected.
+
+Do not remount the EJS routers without a rewrite against the Next `web/` app and `db/schema.postgres.sql`.

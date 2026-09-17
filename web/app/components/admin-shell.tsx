@@ -343,7 +343,7 @@ export default function AdminShell({
             </strong>
             <small>
               {googleLinked ? (
-                <Link href="/integrations?tab=google">Manage in Integrations</Link>
+                <Link href="/integrations?tab=accounts&view=google">Manage in Integrations</Link>
               ) : (
                 <Link href="/integrations">Connect in Integrations</Link>
               )}

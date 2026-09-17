@@ -7,7 +7,7 @@ import { api } from "../../lib/api";
 import { useSession } from "../providers";
 
 function LoginInner() {
-  const { user, loading, login, platform } = useSession();
+  const { user, loading, login, platform, refresh } = useSession();
   const router = useRouter();
   const search = useSearchParams();
   const [email, setEmail] = useState("");
@@ -15,7 +15,8 @@ function LoginInner() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
-  const googleConfigured = Boolean(platform?.google);
+  const googleConfigured = platform?.google === true;
+  const apiOffline = !loading && platform == null;
 
   useEffect(() => {
     const err = search.get("google_error");
@@ -27,6 +28,15 @@ function LoginInner() {
       router.replace("/agency");
     }
   }, [loading, user, router]);
+
+  // Session may have failed while API/Postgres was starting — retry once platform is missing.
+  useEffect(() => {
+    if (loading || platform != null || user) return;
+    const t = setTimeout(() => {
+      refresh().catch(() => undefined);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [loading, platform, user, refresh]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -124,7 +134,9 @@ function LoginInner() {
         </button>
         {!googleConfigured && (
           <p className="muted" style={{ margin: 0 }}>
-            Continue with Google appears when GOOGLE_CLIENT_ID / SECRET are set.
+            {apiOffline
+              ? "API is offline — wait for Postgres + API (npm run dev), then refresh. Continue with Google appears when the session loads."
+              : "Continue with Google appears when GOOGLE_CLIENT_ID / SECRET are set in the API .env."}
           </p>
         )}
       </form>

@@ -70,7 +70,7 @@ export default function ClientsPage() {
               <Link className="secondary-button" href="/agency">
                 Agency dashboard
               </Link>
-              <Link className="secondary-button" href="/integrations?tab=google">
+              <Link className="secondary-button" href="/integrations?tab=accounts&view=google">
                 From Google
               </Link>
               <Link className="primary-button" href="/clients/new">

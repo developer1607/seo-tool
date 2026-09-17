@@ -1,7 +1,9 @@
 'use strict';
 
+require('dotenv').config();
+
 const bcrypt = require('bcryptjs');
-const { getDb, migrate, dbPath } = require('../src/lib/db');
+const { getDb, migrate, closeDb } = require('../src/lib/db');
 const { createWebsite, listWebsites } = require('../src/lib/websites');
 
 migrate();
@@ -67,4 +69,5 @@ if (clients === 0) {
   }
 }
 
-console.log('DB ready:', dbPath);
+console.log('DB ready (PostgreSQL)');
+closeDb();

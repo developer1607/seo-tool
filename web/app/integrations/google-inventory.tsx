@@ -649,7 +649,7 @@ function GoogleInventory({
         </div>
       )}
 
-      {hideChrome && (
+      {hideChrome && agencyLinked && !data?.needsReauth && (
         <div
           style={{
             display: "flex",
@@ -659,51 +659,35 @@ function GoogleInventory({
             alignItems: "center",
           }}
         >
-          {!platform?.google ? (
-            <Link className="secondary-button" href="/settings">
-              Configure env
-            </Link>
-          ) : agencyLinked && !data?.needsReauth ? (
-            <>
-              <button
-                className="primary-button"
-                type="button"
-                disabled={busy === "sync" || loading}
-                onClick={syncAccounts}
-              >
-                {busy === "sync" || loading ? "Syncing…" : "Sync accounts"}
-              </button>
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={!!busy}
-                onClick={() => connectAgency({ mode: "add" })}
-              >
-                {busy === "add" ? "Redirecting…" : "Add Google account"}
-              </button>
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={!!busy}
-                onClick={() =>
-                  connectAgency({
-                    mode: identityId ? "reconnect" : "replace",
-                  })
-                }
-              >
-                Reconnect
-              </button>
-            </>
-          ) : (
-            <button
-              className="primary-button"
-              type="button"
-              disabled={busy === "connect"}
-              onClick={() => connectAgency({ mode: "replace" })}
-            >
-              {busy === "connect" ? "Redirecting…" : "Connect Google"}
-            </button>
-          )}
+          <button
+            className="primary-button"
+            type="button"
+            disabled={busy === "sync" || loading}
+            onClick={syncAccounts}
+          >
+            {busy === "sync" || loading ? "Syncing…" : "Sync accounts"}
+          </button>
+        </div>
+      )}
+
+      {hideChrome && platform?.google && (!agencyLinked || data?.needsReauth) && !loading && (
+        <div style={{ marginBottom: 16 }}>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={busy === "connect"}
+            onClick={() =>
+              connectAgency({
+                mode: identityId && data?.needsReauth ? "reconnect" : "replace",
+              })
+            }
+          >
+            {busy === "connect"
+              ? "Redirecting…"
+              : data?.needsReauth
+                ? "Reconnect Google"
+                : "Connect Google"}
+          </button>
         </div>
       )}
 
@@ -723,7 +707,7 @@ function GoogleInventory({
           </section>
         )}
 
-        {!platform?.google && (
+        {!hideChrome && !platform?.google && (
           <section className="panel empty-section">
             <h2>Google app not configured</h2>
             <p>Add GOOGLE_CLIENT_ID / SECRET in .env first.</p>
@@ -733,7 +717,7 @@ function GoogleInventory({
           </section>
         )}
 
-        {platform?.google && !agencyLinked && !loading && (
+        {!hideChrome && platform?.google && !agencyLinked && !loading && (
           <section className="panel empty-section">
             <h2>
               {data?.needsReauth
@@ -760,7 +744,7 @@ function GoogleInventory({
           </section>
         )}
 
-        {platform?.google && agencyLinked && data?.needsReauth && !loading && (
+        {!hideChrome && platform?.google && agencyLinked && data?.needsReauth && !loading && (
           <section className="panel empty-section">
             <h2>Reconnect agency Google</h2>
             <p>

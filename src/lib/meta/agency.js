@@ -15,19 +15,22 @@ const {
 const CLEARED = '["__cleared__"]';
 
 function ensureAdminMetaTable() {
+  const { tableExists } = require('../db');
   const db = getDb();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS admin_meta_tokens (
-      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      encrypted_access_token TEXT NOT NULL,
-      scopes_json TEXT NOT NULL DEFAULT '[]',
-      token_expires_at TEXT,
-      meta_user_id TEXT,
-      meta_name TEXT,
-      meta_email TEXT,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
+  if (!tableExists('admin_meta_tokens')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS admin_meta_tokens (
+        user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_access_token TEXT NOT NULL,
+        scopes_json TEXT NOT NULL DEFAULT '[]',
+        token_expires_at TEXT,
+        meta_user_id TEXT,
+        meta_name TEXT,
+        meta_email TEXT,
+        updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+      );
+    `);
+  }
   ensureDataIdentitiesTable();
 }
 

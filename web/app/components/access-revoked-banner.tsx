@@ -86,7 +86,7 @@ export default function AccessRevokedBanner({
           >
             Remove client from dashboard
           </button>
-          <a className="secondary-button" href="/integrations?tab=google">
+          <a className="secondary-button" href="/integrations?tab=accounts&view=google">
             Reconnect Google
           </a>
         </div>

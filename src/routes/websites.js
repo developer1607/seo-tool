@@ -16,12 +16,12 @@ function listWebsites(user) {
   if (user.role === 'ADMIN') {
     return getDb()
       .prepare(
-        `SELECT w.*, u.name AS client_name,
+        `SELECT w.*, cl.name AS client_name,
            (SELECT status FROM website_onboarding o WHERE o.website_id = w.id) AS onboarding_status,
            (SELECT COUNT(*) FROM connections c WHERE c.website_id = w.id AND c.status = 'ACTIVE') AS active_connections
          FROM websites w
-         JOIN users u ON u.id = w.client_id
-         ORDER BY w.name COLLATE NOCASE`
+         JOIN clients cl ON cl.id = w.client_id
+         ORDER BY lower(w.name)`
       )
       .all();
   }
@@ -31,7 +31,7 @@ function listWebsites(user) {
          (SELECT status FROM website_onboarding o WHERE o.website_id = w.id) AS onboarding_status,
          (SELECT COUNT(*) FROM connections c WHERE c.website_id = w.id AND c.status = 'ACTIVE') AS active_connections
        FROM websites w WHERE w.client_id = ?
-       ORDER BY w.name COLLATE NOCASE`
+       ORDER BY lower(w.name)`
     )
     .all(user.id);
 }
@@ -40,7 +40,7 @@ router.get('/websites', requireAuth, (req, res) => {
   const clients =
     req.user.role === 'ADMIN'
       ? getDb()
-          .prepare(`SELECT id, name, email FROM users WHERE role = 'CLIENT' ORDER BY name`)
+          .prepare(`SELECT id, name, website_url AS email FROM clients ORDER BY lower(name)`)
           .all()
       : [];
   res.render('websites/list', {
@@ -70,7 +70,7 @@ router.post('/websites', requireAuth, (req, res) => {
   const clients =
     req.user.role === 'ADMIN'
       ? getDb()
-          .prepare(`SELECT id, name, email FROM users WHERE role = 'CLIENT' ORDER BY name`)
+          .prepare(`SELECT id, name, website_url AS email FROM clients ORDER BY lower(name)`)
           .all()
       : [];
   if (!name || !domain || !clientId) {
@@ -83,9 +83,7 @@ router.post('/websites', requireAuth, (req, res) => {
       error: 'Name and domain required.',
     });
   }
-  const owner = getDb()
-    .prepare(`SELECT id FROM users WHERE id = ? AND role = 'CLIENT'`)
-    .get(clientId);
+  const owner = getDb().prepare(`SELECT id FROM clients WHERE id = ?`).get(clientId);
   if (!owner) {
     return res.status(400).render('websites/list', {
       title: 'Websites',
@@ -98,7 +96,7 @@ router.post('/websites', requireAuth, (req, res) => {
   }
   const info = getDb()
     .prepare(
-      `INSERT INTO websites (client_id, name, domain, timezone, currency)
+      `INSERT INTO websites (client_id, name, url, timezone, currency)
        VALUES (?, ?, ?, ?, ?)`
     )
     .run(clientId, name, domain, timezone, currency);

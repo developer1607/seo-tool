@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "seo-reporting-tool",
   "version": "0.1.0",
   "private": true,
@@ -9,14 +9,20 @@
   "scripts": {
     "postinstall": "npm install --prefix web --ignore-scripts",
     "setup": "npm install && npm run db:init",
-    "dev": "concurrently -k -n api,web -c blue,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev": "concurrently -k -n pg,api,web -c green,blue,magenta \"npm run db:pg:start\" \"node scripts/wait-for-pg.js && npm run dev:api\" \"npm run dev:web\"",
     "dev:api": "node --watch --watch-path=src src/index.js",
     "dev:web": "npm run dev --prefix web",
+    "wait:pg": "node scripts/wait-for-pg.js",
     "build": "npm run build --prefix web",
     "start": "concurrently -k -n api,web -c blue,magenta \"npm:start:api\" \"npm:start:web\"",
     "start:api": "node src/index.js --prod",
     "start:web": "npm run start --prefix web",
     "db:init": "node scripts/init-db.js",
+    "db:verify": "node scripts/verify-pg.js",
+    "db:verify-queries": "node scripts/verify-pg-queries.js",
+    "db:migrate-sqlite": "node scripts/migrate-sqlite-to-pg.js",
+    "db:pg:start": "node scripts/start-embedded-pg.js",
+    "smoke:pg": "node scripts/smoke-pg-apis.js",
     "smoke:full": "node scripts/smoke-full-path.js",
     "smoke:ui": "node scripts/smoke-ui.js",
     "smoke:google": "node scripts/smoke-google.js"
@@ -25,9 +31,14 @@
     "bcryptjs": "^3.0.2",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.5.0",
-    "express": "^5.1.0"
+    "embedded-postgres": "^18.4.0-beta.17",
+    "express": "^5.1.0",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
+  },
+  "allowScripts": {
+    "@embedded-postgres/windows-x64@18.4.0-beta.17": true
   }
 }

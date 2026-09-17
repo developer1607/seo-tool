@@ -12,6 +12,9 @@ db/*.sqlite
 db/*.sqlite-journal
 db/*.sqlite-wal
 db/*.sqlite-shm
+data/pg/
+data/pg-utf8/
+tmp-api-out.txt
 cookies.txt
 .DS_Store
 *.pem

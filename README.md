@@ -8,7 +8,7 @@ Admin SEO / marketing reporting portal: connect Google (GA4, Search Console, Ads
 |-------|------|------|
 | Next.js UI | `web/` | 3000 |
 | Express API | `src/` | 4000 |
-| SQLite | `db/schema.sql` → `db/app.sqlite` (local, gitignored) | — |
+| PostgreSQL | `db/schema.postgres.sql` via `DATABASE_URL` | **5434** local embedded (`npm run db:pg:start`); 5432 only if using `docker-compose.yml` |
 
 Requires **Node.js 24+**.
 
@@ -17,14 +17,21 @@ Requires **Node.js 24+**.
 ```bash
 cp .env.example .env
 # Edit AUTH_SECRET, APP_ENCRYPTION_KEY, APP_URL, Google OAuth fields
-npm run setup
+npm install
+# Terminal A — local Postgres (embedded, no Docker):
+npm run db:pg:start
+# Terminal B:
+npm run db:init
+npm run db:verify
+# Optional: copy legacy SQLite → Postgres (keeps db/app.sqlite as backup)
+# npm run db:migrate-sqlite
 npm run dev
 ```
 
 - UI: http://localhost:3000  
 - API health: http://localhost:4000/health  
 
-Never commit `.env` or live SQLite files.
+Never commit `.env` or live database files. Legacy `db/app.sqlite` is backup-only after cutover.
 
 ## Docs
 
@@ -44,9 +51,12 @@ Checklist: [docs/01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md](docs/01-core/
 
 | Command | Purpose |
 |---------|---------|
-| `npm run dev` | API + web together |
-| `npm run build` / `npm start` | Production build + start |
-| `npm run db:init` | Apply schema / seed |
+| `npm run dev` | Embedded PG + API + web |
+| `npm run db:pg:start` | Local Postgres (UTF-8, port 5434) — leave running if not using `dev` |
+| `npm run db:init` | Apply `schema.postgres.sql` / seed |
+| `npm run db:verify` | Confirm required tables |
+| `npm run smoke:pg` | API smoke against running API + PG |
+| `npm run build` / `npm start` | Production build + start (**does not** start Postgres) |
 | `npm run smoke:ui` | UI smoke against running API |
 
 ## Repo layout
@@ -54,7 +64,7 @@ Checklist: [docs/01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md](docs/01-core/
 ```
 web/          Next.js app
 src/          Express API + Google/Meta libs
-db/           schema.sql (sqlite files gitignored)
+db/           schema.postgres.sql (live); schema.sql leftover SQLite; sqlite files gitignored
 docs/         Product docs (see docs/README.md)
 scripts/      init-db + smoke scripts
 .cursor/      Agent rules + /replicate-webastral command

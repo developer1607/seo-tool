@@ -1,6 +1,6 @@
 'use strict';
 
-const { getDb } = require('../db');
+const { getDb, tableExists, hasColumn } = require('../db');
 const { decrypt } = require('../crypto');
 
 let dataIdentitiesReady = false;
@@ -8,31 +8,18 @@ let dataIdentitiesReady = false;
 function ensureDataIdentitiesTable() {
   if (dataIdentitiesReady) return;
   const db = getDb();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS data_identities (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      provider TEXT NOT NULL CHECK (provider IN ('google', 'meta')),
-      provider_sub TEXT NOT NULL DEFAULT '',
-      email TEXT,
-      display_name TEXT,
-      encrypted_token TEXT NOT NULL DEFAULT '',
-      scopes_json TEXT NOT NULL DEFAULT '[]',
-      token_expires_at TEXT,
-      is_default INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'active'
-        CHECK (status IN ('active', 'needs_reauth', 'cleared')),
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE (user_id, provider, provider_sub)
+  if (!tableExists('data_identities')) {
+    throw new Error(
+      'data_identities table missing — run npm run db:init (PostgreSQL schema)'
     );
-    CREATE INDEX IF NOT EXISTS idx_data_identities_user
-      ON data_identities(user_id, provider);
-  `);
+  }
 
-  // connections.data_identity_id
-  if (!db.prepare(`PRAGMA table_info(connections)`).all().some((c) => c.name === 'data_identity_id')) {
-    db.exec(`ALTER TABLE connections ADD COLUMN data_identity_id INTEGER REFERENCES data_identities(id) ON DELETE SET NULL`);
+  if (tableExists('connections') && !hasColumn('connections', 'data_identity_id')) {
+    db.exec(
+      `ALTER TABLE connections
+       ADD COLUMN IF NOT EXISTS data_identity_id BIGINT
+       REFERENCES data_identities(id) ON DELETE SET NULL`
+    );
   }
 
   // Mark ready before backfill so getDefaultIdentity cannot re-enter migrate.
@@ -83,12 +70,7 @@ function migrateLegacyAdminTokens() {
     )
     .get().c;
   if (googleCount === 0) {
-    const hasAdmin = db
-      .prepare(
-        `SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='admin_google_tokens'`
-      )
-      .get();
-    if (hasAdmin) {
+    if (tableExists('admin_google_tokens')) {
       const rows = db.prepare(`SELECT * FROM admin_google_tokens`).all();
       for (const row of rows) {
         if (!scopesUsable(row.scopes_json)) continue;
@@ -124,12 +106,7 @@ function migrateLegacyAdminTokens() {
     )
     .get().c;
   if (metaCount === 0) {
-    const hasMeta = db
-      .prepare(
-        `SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='admin_meta_tokens'`
-      )
-      .get();
-    if (hasMeta) {
+    if (tableExists('admin_meta_tokens')) {
       const rows = db.prepare(`SELECT * FROM admin_meta_tokens`).all();
       for (const row of rows) {
         if (!scopesUsable(row.scopes_json)) continue;
@@ -336,7 +313,7 @@ function upsertIdentity({
          email = COALESCE(?, email),
          display_name = COALESCE(?, display_name),
          provider_sub = ?,
-         is_default = CASE WHEN ? THEN 1 ELSE is_default END,
+         is_default = CASE WHEN ? = 1 THEN 1 ELSE is_default END,
          status = 'active',
          updated_at = datetime('now')
        WHERE id = ?`

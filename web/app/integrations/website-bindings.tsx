@@ -390,14 +390,14 @@ export default function WebsiteBindings() {
     if (p.key === "META_ADS") {
       if (actions.includes("connect") || actions.includes("reconnect")) {
         return (
-          <Link className="primary-button" href="/integrations?tab=services">
+          <Link className="primary-button" href="/integrations?tab=accounts">
             Connect Meta
           </Link>
         );
       }
       if (actions.includes("select")) {
         return (
-          <Link className="primary-button" href="/integrations?tab=services">
+          <Link className="primary-button" href="/integrations?tab=accounts">
             Link Meta account
           </Link>
         );

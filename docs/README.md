@@ -31,6 +31,7 @@ docs/
 | [01-core/01-shipping/DEV_LOGBOOK.md](./01-core/01-shipping/DEV_LOGBOOK.md) | Day-by-day shipping log |
 | [01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md](./01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md) | Master Done / Pending |
 | [01-core/01-shipping/PHASES.md](./01-core/01-shipping/PHASES.md) | Phase board |
+| [01-core/01-shipping/DOC_AND_PG_EVAL-2026-09-17.md](./01-core/01-shipping/DOC_AND_PG_EVAL-2026-09-17.md) | Docs vs Postgres cutover |
 | [01-core/02-requirements/SRS.md](./01-core/02-requirements/SRS.md) | Requirements |
 | [01-core/04-integrations/STANDARD_GOOGLE_ACCESS_REVOKED.md](./01-core/04-integrations/STANDARD_GOOGLE_ACCESS_REVOKED.md) | Revoke UX standard |
 

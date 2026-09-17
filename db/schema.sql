@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
-  layer TEXT NOT NULL CHECK (layer IN ('PLATFORM', 'CLIENT')),
+  layer TEXT NOT NULL CHECK (layer IN ('PLATFORM', 'CLIENT', 'WEBSITE')),
   type TEXT NOT NULL,
   severity TEXT NOT NULL DEFAULT 'info'
     CHECK (severity IN ('info', 'success', 'warn', 'error')),

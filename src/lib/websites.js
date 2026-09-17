@@ -5,7 +5,7 @@ const { getDb } = require('./db');
 function listWebsites(clientId) {
   return getDb()
     .prepare(
-      `SELECT * FROM websites WHERE client_id = ? ORDER BY name COLLATE NOCASE`
+      `SELECT * FROM websites WHERE client_id = ? ORDER BY lower(name)`
     )
     .all(clientId);
 }

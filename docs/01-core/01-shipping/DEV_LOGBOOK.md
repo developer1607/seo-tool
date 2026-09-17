@@ -5,6 +5,7 @@
 **Canonical files to load with this book:**
 - `docs/01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md` — master Done / Pending checklist  
 - `docs/01-core/01-shipping/PHASES.md` — phase status  
+- `docs/01-core/01-shipping/DOC_AND_PG_EVAL-2026-09-17.md` — docs vs Postgres cutover  
 - `Engineering.md` — stack + setup  
 - `.cursor/rules/seo-reporting-collaboration.mdc` — product instincts  
 - This file — chronological how/what  
@@ -40,6 +41,102 @@ One sentence.
 ```
 
 **Rule:** Update this file the same turn as the checklist when something ships. Newest entry at the **top** (below this header).
+
+---
+
+## 2026-09-17 — Full docs eval + post-Postgres gap check
+
+### Goal
+Evaluate every labeled doc against live code, then record what the SQLite → Postgres cutover actually left in place vs missing.
+
+### Done
+- Wrote `docs/01-core/01-shipping/DOC_AND_PG_EVAL-2026-09-17.md` (folder-by-folder verdict + live table counts)
+- Confirmed local PG: embedded **5434**, recovered from unclean shutdown, data present
+- `db:verify` → users=2 clients=10; `db:verify-queries` ALL PASSED; `/health` `db: up`; `smoke:pg` **23/23**
+- Earlier UI proxy `ECONNREFUSED :4000` was API-down, not a failed migration
+
+### How (for replication)
+- Canonical DDL: `db/schema.postgres.sql` (not `db/schema.sql`)
+- Local PG: `npm run db:pg:start` → `data/pg-utf8/` → `DATABASE_URL` on 5434
+- `docker-compose.yml` is unused leftover (5432); do not confuse with embedded 5434
+- `website_onboarding` / `client_invites` exist in PG with **0 rows** — EJS routers never mounted on `src/index.js`
+- `src/lib/metrics/views.js` **is live** (agency/client overview); `LEGACY_UNMOUNTED.md` was wrong on that file
+- App SQL still uses `datetime('now')`; `pg-adapter.js` rewrites it
+
+### Checklist impact
+- Postgres SQL audit: **API smoke done**; browser product smoke + native SQL rewrite still pending
+- Smoke item `db:pg:start` + `db:verify` + `/api/health` verified this machine
+- Pending unchanged: Postgres prod, on-visit/cron Sync, Phase D ops, Phase E, share links
+
+### Smoke
+1. `npm run db:pg:start` (leave running)
+2. `npm run db:verify` and `npm run db:verify-queries`
+3. Single API: `npm run start:api` or `npm run dev`
+4. `npm run smoke:pg` → 23/23
+5. Hard-refresh http://localhost:3000/login — if session proxy fails, API is down, not PG
+
+### Do not
+- Re-run `db:migrate-sqlite` on a healthy PG (it DELETE-then-copy)
+- Treat alpha SQLite-volume deploy notes as current
+- Start only `web/` without API + PG
+
+---
+
+## 2026-09-16 — Agency PG date() crash + full API smoke
+
+### Goal
+Agency dashboard `function date(unknown, unknown) does not exist` after Postgres cutover; make portfolio/overview/reports APIs green.
+
+### Done
+- Root cause: SQLite `date('now', ?)` + **multiple stale `node src/index.js` processes** still serving old code
+- `snapshotsSince` uses JS `YYYY-MM-DD` cutoff; `pg-adapter` also rewrites `date('now'…)`
+- `websiteOverview` guards missing `website_onboarding` table
+- Killed duplicate APIs; one clean `npm run start:api`
+- `npm run smoke:pg` → **23/23** (agency, clients, overview, platforms, reports, integrations)
+
+### Smoke
+1. `npm run db:pg:start` (if needed)
+2. Single API: `npm run start:api` (kill extra `src/index.js` first)
+3. `npm run smoke:pg`
+4. Hard-refresh http://localhost:3000/agency
+
+### Do not
+- Leave multiple API processes on :4000
+
+---
+
+## 2026-09-16 — PostgreSQL cutover (local, no Docker)
+
+### Goal
+Replace `node:sqlite` with PostgreSQL via `DATABASE_URL` (no Docker).
+
+### Done
+- `db/schema.postgres.sql` + sync `pg` adapter (`src/lib/pg-adapter.js` / `pg-worker.js`)
+- `src/lib/db.js` requires `DATABASE_URL`; scripts: `db:init`, `db:verify`, `db:migrate-sqlite`, `db:pg:start`
+- Embedded local PG (`embedded-postgres`, UTF-8 cluster on port **5434**) when no system install
+- SQLite → PG data copy completed; `db/app.sqlite` left as backup
+- Removed SQLite-only SQL (`COLLATE NOCASE`, `PRAGMA`, `sqlite_master`)
+- Agency overview: replaced SQLite `date('now', '-N days')` with JS ISO cutoff (`views.js`)
+
+### How (for replication)
+1. `npm install` (approve `@embedded-postgres/windows-x64` scripts once)
+2. `npm run db:pg:start` (leave running) — writes/updates `DATABASE_URL` in `.env`
+3. `npm run db:init` → `npm run db:verify`
+4. Optional: `npm run db:migrate-sqlite` if `db/app.sqlite` exists
+5. `npm run dev`
+
+### Checklist impact
+- Done: **PostgreSQL cutover (local)**
+- Pending: **Postgres prod / free deploy**, **Postgres SQL audit (full product smoke)**
+
+### Smoke
+- `npm run db:verify` → tables OK; clients/snapshots counts match prior SQLite
+- API `/api/health` → `db: up`
+- Agency dashboard should load after API restart (no `date(unknown, unknown)`)
+
+### Do not
+- Commit `.env`, `data/pg*`, or `db/app.sqlite`
+- System winget Postgres (optional later); Docker still out of scope
 
 ---
 

@@ -4,7 +4,7 @@ const { getDb } = require('./db');
 
 function listClients() {
   return getDb()
-    .prepare(`SELECT * FROM clients ORDER BY name COLLATE NOCASE`)
+    .prepare(`SELECT * FROM clients ORDER BY lower(name)`)
     .all();
 }
 

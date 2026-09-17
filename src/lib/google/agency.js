@@ -17,24 +17,29 @@ const {
 const CLEARED_SCOPES = '["__cleared__"]';
 
 function ensureAdminGoogleTable() {
+  const { tableExists, hasColumn } = require('../db');
   const db = getDb();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS admin_google_tokens (
-      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      encrypted_refresh_token TEXT NOT NULL,
-      scopes_json TEXT NOT NULL DEFAULT '[]',
-      google_email TEXT,
-      google_sub TEXT,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-  const cols = db.prepare(`PRAGMA table_info(admin_google_tokens)`).all();
-  const names = new Set(cols.map((c) => c.name));
-  if (!names.has('google_email')) {
-    db.exec(`ALTER TABLE admin_google_tokens ADD COLUMN google_email TEXT`);
+  if (!tableExists('admin_google_tokens')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS admin_google_tokens (
+        user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        encrypted_refresh_token TEXT NOT NULL,
+        scopes_json TEXT NOT NULL DEFAULT '[]',
+        google_email TEXT,
+        google_sub TEXT,
+        updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+      );
+    `);
   }
-  if (!names.has('google_sub')) {
-    db.exec(`ALTER TABLE admin_google_tokens ADD COLUMN google_sub TEXT`);
+  if (!hasColumn('admin_google_tokens', 'google_email')) {
+    db.exec(
+      `ALTER TABLE admin_google_tokens ADD COLUMN IF NOT EXISTS google_email TEXT`
+    );
+  }
+  if (!hasColumn('admin_google_tokens', 'google_sub')) {
+    db.exec(
+      `ALTER TABLE admin_google_tokens ADD COLUMN IF NOT EXISTS google_sub TEXT`
+    );
   }
   ensureDataIdentitiesTable();
 }

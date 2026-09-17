@@ -157,7 +157,7 @@ export default function AgencyDashboardPage() {
                   {data.agencyGoogle?.linked ? "Linked" : "Not linked"}
                 </strong>
                 <div className="metric-bottom">
-                  <Link className="text-button" href="/integrations?tab=google">
+                  <Link className="text-button" href="/integrations?tab=accounts&view=google">
                     Manage →
                   </Link>
                 </div>

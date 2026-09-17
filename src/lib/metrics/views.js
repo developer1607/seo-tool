@@ -86,6 +86,12 @@ function sumField(rows, field) {
   return rows.reduce((n, r) => n + (Number(r[field]) || 0), 0);
 }
 
+function isoDaysAgo(days) {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - (Number(days) || 0));
+  return d.toISOString().slice(0, 10);
+}
+
 function snapshotsSince(websiteIds, days = 28) {
   if (!websiteIds.length) return [];
   const placeholders = websiteIds.map(() => '?').join(',');
@@ -93,10 +99,10 @@ function snapshotsSince(websiteIds, days = 28) {
     .prepare(
       `SELECT * FROM metric_snapshots
        WHERE website_id IN (${placeholders})
-         AND date >= date('now', ?)
+         AND date >= ?
        ORDER BY date ASC`
     )
-    .all(...websiteIds, `-${days} days`);
+    .all(...websiteIds, isoDaysAgo(days));
 }
 
 function emptyKpis() {
@@ -199,14 +205,18 @@ function overviewClient(clientId) {
 
 function websiteOverview(websiteId) {
   const db = getDb();
+  const { tableExists } = require('../db');
   const website = db.prepare(`SELECT * FROM websites WHERE id = ?`).get(websiteId);
   if (!website) return null;
-  const onboarding = db
-    .prepare(`SELECT * FROM website_onboarding WHERE website_id = ?`)
-    .get(websiteId);
+  let onboarding = null;
+  if (tableExists('website_onboarding')) {
+    onboarding = db
+      .prepare(`SELECT * FROM website_onboarding WHERE website_id = ?`)
+      .get(websiteId);
+  }
   const connections = db
-    .prepare(`SELECT * FROM connections WHERE website_id = ? ORDER BY provider`)
-    .all(websiteId);
+      .prepare(`SELECT * FROM connections WHERE website_id = ? ORDER BY provider`)
+      .all(websiteId);
   const kpis = buildOverviewKpis([websiteId]);
   const banners = [];
   if (!onboarding || onboarding.status !== 'COMPLETE') {

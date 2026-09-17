@@ -1,28 +1,28 @@
-﻿# Webastral — collaboration & working instinct
+ï»¿# Webastral â collaboration & working instinct
 
 ## Living rule
 
 1. Follow this file, root `Engineering.md`, and `docs/01-core/02-requirements/SRS.md` / `docs/01-core/03-product-ux/NAMING.md` every turn
-2. Keep docs in sync when flows/env/schema change — see `docs/README.md` for the labeled folder map
+2. Keep docs in sync when flows/env/schema change â see `docs/README.md` for the labeled folder map
 3. Capture new preferences here the same turn
 4. Short bullets; merge duplicates
-5. "remember / always / from now on" → update immediately
-6. **Day log:** when shipping user-visible work, update `docs/01-core/01-shipping/DEV_LOGBOOK.md` (newest entry on top) **and** `docs/01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md` the same turn — so another Cursor profile can run `/replicate-webastral` and continue
+5. "remember / always / from now on" â update immediately
+6. **Day log:** when shipping user-visible work, update `docs/01-core/01-shipping/DEV_LOGBOOK.md` (newest entry on top) **and** `docs/01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md` the same turn â so another Cursor profile can run `/replicate-webastral` and continue
 
 ## Product
 
-- **Webastral** — Admin-only for now (freelancer/client login later)
-- Hierarchy: **Admin → Client → Website(s) → connections / snapshots / reports**
+- **Webastral** â Admin-only for now (freelancer/client login later)
+- Hierarchy: **Admin â Client â Website(s) â connections / snapshots / reports**
 - Four sources: Google Ads, Meta Ads, GA4, Search Console (per website)
 - **Meta app:** v1 = reports only (`ads_read`). Same Business app later grows to full ads ops (`ads_management`). Do **not** tick every Meta use case now. Add products/scopes when that UI ships.
 - Platform apps once in `.env`; tokens per website on `connections`
-- **Google access revoked:** confirm with Google API first → banner + Remove client / Reconnect — `docs/01-core/04-integrations/STANDARD_GOOGLE_ACCESS_REVOKED.md`
+- **Google access revoked:** confirm with Google API first â banner + Remove client / Reconnect â `docs/01-core/04-integrations/STANDARD_GOOGLE_ACCESS_REVOKED.md`
 - Admin can Connect agency Google and **Import as client** from GA4/GSC list (bulk import shipped)
 
 ## Stack
 
 - Next `web/` :3000 + Express `src/` :4000; `npm run dev` via concurrently
-- SQLite `node:sqlite`; no Prisma
+- PostgreSQL via `DATABASE_URL` (`pg` sync adapter); local: `npm run db:pg:start` (no Docker). Legacy `db/app.sqlite` backup only.
 
 ## Implementation
 
@@ -45,15 +45,19 @@ docs/04-audits-archive/01-handoffs|02-portal-audits|03-research
 
 ## Working instinct log
 
-- **2026-09-16** — Docs fully labeled: every file under numbered folders; core split into shipping / requirements / product-ux / integrations / data-api / engineering. Index: `docs/README.md`.
-- **2026-09-16** — Meta Login for Business OAuth: `ads_read` + `business_management` only. `email` / `public_profile` are invalid on this app type.
-- **2026-09-16** — Meta long-term = ads platform; v1 OAuth stays `ads_read` + `business_management`. Add `ads_management` when write UI exists.
-- **2026-09-16** — Reports: every KPI gets scorecard + dual-series chart (this period vs prior); Generate has Use Overview defaults + per-KPI chart types (`columns_json` v2).
-- **2026-09-16** — Mobile hamburger drawer (≤760px); `guessUrlFromGsc` single source in `importAsset.js`. Free-deploy P0 = persistent SQLite volume.
-- **2026-09-16** — Bulk Google import: `import-bulk` + Integrations UI (Import all / selected GA4+GSC); Ads stay manual.
-- **2026-09-15** — Dev logbook + `/replicate-webastral`. Update logbook + checklist same turn when shipping.
-- **2026-09-15** — Brand Astralytics → **Webastral**; cookie `webastral_session`.
-- **2026-09-15** — Reports PDF/branding; revoke standard; platform Recharts; Integrations+Sync P0s; Overview E-Moto layout; header Sync gated.
-- **2026-09-14** — Phase A SSO + B Integrations hub + C multi-Google identities shipped; Meta ops + cron still open.
-- **2026-09-11** — Navigation hardening; agency Google; Ads Cloud-project access; reports section catalog; smoke:full path.
-- **2026-09-10** — Google OAuth live path; multi-website under Client; merged Next UI + Express.
+- **2026-09-17** — After PG cutover: live DDL is `db/schema.postgres.sql`; local PG is embedded **5434** (`npm run db:pg:start`), not Docker 5432. Empty `website_onboarding` / `client_invites` is expected (EJS routers unmounted). `views.js` is live. Do not re-run `db:migrate-sqlite` on a healthy DB. Full eval: `docs/01-core/01-shipping/DOC_AND_PG_EVAL-2026-09-17.md`.
+
+- **2026-09-16** — DB is PostgreSQL (DATABASE_URL); local without Docker = npm run db:pg:start (embedded UTF-8, port 5434).
+
+- **2026-09-16** â Docs fully labeled: every file under numbered folders; core split into shipping / requirements / product-ux / integrations / data-api / engineering. Index: `docs/README.md`.
+- **2026-09-16** â Meta Login for Business OAuth: `ads_read` + `business_management` only. `email` / `public_profile` are invalid on this app type.
+- **2026-09-16** â Meta long-term = ads platform; v1 OAuth stays `ads_read` + `business_management`. Add `ads_management` when write UI exists.
+- **2026-09-16** â Reports: every KPI gets scorecard + dual-series chart (this period vs prior); Generate has Use Overview defaults + per-KPI chart types (`columns_json` v2).
+- **2026-09-16** â Mobile hamburger drawer (â¤760px); `guessUrlFromGsc` single source in `importAsset.js`. Free-deploy P0 = persistent Postgres (DATABASE_URL), not SQLite.
+- **2026-09-16** â Bulk Google import: `import-bulk` + Integrations UI (Import all / selected GA4+GSC); Ads stay manual.
+- **2026-09-15** â Dev logbook + `/replicate-webastral`. Update logbook + checklist same turn when shipping.
+- **2026-09-15** â Brand Astralytics â **Webastral**; cookie `webastral_session`.
+- **2026-09-15** â Reports PDF/branding; revoke standard; platform Recharts; Integrations+Sync P0s; Overview E-Moto layout; header Sync gated.
+- **2026-09-14** â Phase A SSO + B Integrations hub + C multi-Google identities shipped; Meta ops + cron still open.
+- **2026-09-11** â Navigation hardening; agency Google; Ads Cloud-project access; reports section catalog; smoke:full path.
+- **2026-09-10** â Google OAuth live path; multi-website under Client; merged Next UI + Express.

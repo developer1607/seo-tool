@@ -1,23 +1,13 @@
-﻿'use strict';
+'use strict';
 
-const { getDb } = require('../db');
+const { getDb, tableExists } = require('../db');
 
 function ensureAuthIdentitiesTable() {
-  const db = getDb();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS auth_identities (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      provider TEXT NOT NULL,
-      provider_sub TEXT NOT NULL,
-      email TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE (provider, provider_sub)
+  if (!tableExists('auth_identities')) {
+    throw new Error(
+      'auth_identities table missing — run npm run db:init (PostgreSQL schema)'
     );
-    CREATE INDEX IF NOT EXISTS idx_auth_identities_user
-      ON auth_identities(user_id);
-  `);
+  }
 }
 
 function getGoogleLoginIdentity(userId) {
