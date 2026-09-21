@@ -84,9 +84,19 @@ export type Session = {
     agencyMeta?: {
       linked: boolean;
       cleared?: boolean;
+      needsReauth?: boolean;
       name?: string | null;
       email?: string | null;
       updatedAt?: string | null;
+      identityId?: number | null;
+      identities?: {
+        id: number;
+        email?: string | null;
+        displayName?: string | null;
+        isDefault?: boolean;
+        status?: string;
+        hasToken?: boolean;
+      }[];
     } | null;
     googleLogin?: {
       linked: boolean;
@@ -104,6 +114,8 @@ export type Client = {
   brand_secondary: string;
   timezone: string;
   currency: string;
+  origin?: string | null;
+  created_by_user_id?: number | null;
 };
 
 export type Website = {

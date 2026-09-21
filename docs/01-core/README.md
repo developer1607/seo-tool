@@ -8,7 +8,7 @@
 | [`02-requirements/`](./02-requirements/) | Requirements | [SRS](./02-requirements/SRS.md) |
 | [`03-product-ux/`](./03-product-ux/) | Product & UX | [NAVIGATION](./03-product-ux/NAVIGATION.md), [IA](./03-product-ux/IA.md), [NAMING](./03-product-ux/NAMING.md), [DESIGN](./03-product-ux/DESIGN.md), [ONBOARDING](./03-product-ux/ONBOARDING.md) |
 | [`04-integrations/`](./04-integrations/) | Integrations | [INTEGRATIONS](./04-integrations/INTEGRATIONS.md), [STANDARD_GOOGLE_ACCESS_REVOKED](./04-integrations/STANDARD_GOOGLE_ACCESS_REVOKED.md) |
-| [`05-data-api/`](./05-data-api/) | Data & API | [METRICS](./05-data-api/METRICS.md), [API_VIEW_MAP](./05-data-api/API_VIEW_MAP.md), [NOTIFICATIONS](./05-data-api/NOTIFICATIONS.md) |
+| [`05-data-api/`](./05-data-api/) | Data & API | [METRICS](./05-data-api/METRICS.md), [API_VIEW_MAP](./05-data-api/API_VIEW_MAP.md), [NOTIFICATIONS](./05-data-api/NOTIFICATIONS.md), [PROVENANCE_AND_INTEGRATIONS_SCHEMA](./05-data-api/PROVENANCE_AND_INTEGRATIONS_SCHEMA.md) |
 | [`06-engineering/`](./06-engineering/) | Engineering notes | [LEGACY_UNMOUNTED](./06-engineering/LEGACY_UNMOUNTED.md) |
 
 Parent index: [../README.md](../README.md)

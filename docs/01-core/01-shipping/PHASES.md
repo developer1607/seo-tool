@@ -1,7 +1,7 @@
 # Delivery phases — Webastral
 
 Aligned to `docs/01-core/02-requirements/SRS.md` and `docs/01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md`.  
-**Checklist updated:** 2026-09-17  
+**Checklist updated:** 2026-09-18  
 
 **Data:** local PostgreSQL via `DATABASE_URL` (`db/schema.postgres.sql`). See `DOC_AND_PG_EVAL-2026-09-17.md`. Prod Postgres still pending.
 
@@ -34,7 +34,7 @@ Master checklist: `docs/01-core/01-shipping/ACCOUNT_INTEGRATIONS_PLAN.md` (top o
 - [x] Charts on platform pages (interactive Recharts + channel tables)
 - [x] Google access revoked standard (live confirm + Remove client)
 - [ ] Scheduled / nightly Sync job
-- [ ] On-visit Sync for performance pages
+- [x] On-visit Sync for performance pages
 
 ## Phase 2 — Reports pack (mostly done)
 

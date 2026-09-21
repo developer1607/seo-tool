@@ -17,6 +17,10 @@ const {
   updateWebsite,
   deleteWebsite,
 } = require('../lib/websites');
+const {
+  setClientOriginIfNew,
+  recordClientSource,
+} = require('../lib/clientProvenance');
 const { resolvePreset, PRESETS } = require('../lib/dates');
 const notifications = require('../lib/notifications');
 const { createNotification } = require('../lib/notifications');
@@ -603,8 +607,10 @@ router.post('/clients', requireAuth, (req, res) => {
   const currency = String(req.body.currency || 'INR');
   const info = getDb()
     .prepare(
-      `INSERT INTO clients (name, website_url, brand_primary, brand_secondary, timezone, currency)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO clients (
+         name, website_url, brand_primary, brand_secondary, timezone, currency,
+         origin, created_by_user_id
+       ) VALUES (?, ?, ?, ?, ?, ?, 'MANUAL', ?)`
     )
     .run(
       name,
@@ -612,13 +618,22 @@ router.post('/clients', requireAuth, (req, res) => {
       String(req.body.brand_primary || '#0d7a6f'),
       String(req.body.brand_secondary || '#1e2530'),
       timezone,
-      currency
+      currency,
+      req.user.id
     );
+  setClientOriginIfNew(info.lastInsertRowid, 'MANUAL', req.user.id);
   const site = createWebsite(info.lastInsertRowid, {
     name: String(req.body.website_name || name).trim() || name,
     url: website_url,
     timezone,
     currency,
+  });
+  recordClientSource({
+    clientId: info.lastInsertRowid,
+    websiteId: site.id,
+    source: 'MANUAL',
+    externalAccountId: '',
+    createdByUserId: req.user.id,
   });
   createNotification({
     userId: req.user.id,

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import AdminShell, { PageHeader } from "../components/admin-shell";
+import { OriginBadge } from "../components/origin-badge";
 import { api, type Client, type Session } from "../../lib/api";
 import { useSession } from "../providers";
 
@@ -102,6 +103,7 @@ export default function ClientsPage() {
             <div className="table-heading">
               <span>CLIENT</span>
               <span>PRIMARY URL</span>
+              <span>ORIGIN</span>
               <span>CURRENCY</span>
               <span>TIMEZONE</span>
               <span />
@@ -127,6 +129,9 @@ export default function ClientsPage() {
                     </span>
                   </div>
                   <span>{client.website_url || "—"}</span>
+                  <span>
+                    <OriginBadge origin={client.origin} />
+                  </span>
                   <strong>{client.currency}</strong>
                   <span>{client.timezone}</span>
                 </Link>

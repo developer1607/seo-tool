@@ -1,6 +1,7 @@
 'use strict';
 
 const { getDb } = require('./db');
+const { normalizeDomain } = require('./clientProvenance');
 
 function listWebsites(clientId) {
   return getDb()
@@ -17,15 +18,18 @@ function getWebsite(id) {
 function createWebsite(clientId, { name, url, timezone, currency }) {
   const client = getDb().prepare(`SELECT * FROM clients WHERE id = ?`).get(clientId);
   if (!client) return null;
+  const siteUrl = String(url || '').trim();
+  const domain = normalizeDomain(siteUrl);
   const info = getDb()
     .prepare(
-      `INSERT INTO websites (client_id, name, url, timezone, currency)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO websites (client_id, name, url, primary_domain, timezone, currency)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
     .run(
       clientId,
       String(name || '').trim() || 'Website',
-      String(url || '').trim(),
+      siteUrl,
+      domain,
       timezone || client.timezone,
       currency || client.currency
     );
@@ -37,16 +41,18 @@ function createWebsite(clientId, { name, url, timezone, currency }) {
 function updateWebsite(id, fields) {
   const site = getWebsite(id);
   if (!site) return null;
+  const nextUrl = String(fields.url || site.url).trim();
   getDb()
     .prepare(
       `UPDATE websites SET
-         name = ?, url = ?, timezone = ?, currency = ?,
+         name = ?, url = ?, primary_domain = ?, timezone = ?, currency = ?,
          updated_at = datetime('now')
        WHERE id = ?`
     )
     .run(
       String(fields.name || site.name).trim(),
-      String(fields.url || site.url).trim(),
+      nextUrl,
+      normalizeDomain(nextUrl),
       fields.timezone || site.timezone,
       fields.currency || site.currency,
       id

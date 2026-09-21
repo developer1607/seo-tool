@@ -166,13 +166,36 @@ button { border: 0; font: inherit; cursor: pointer; }
 }
 .client-row-main {
   display: grid;
-  grid-template-columns: 2fr .8fr 1fr 1fr;
+  grid-template-columns: 2fr .9fr .55fr .55fr .9fr;
   gap: 12px;
   align-items: center;
   padding: 15px 22px;
   color: inherit;
   text-decoration: none;
 }
+.client-table .table-heading {
+  display: grid;
+  grid-template-columns: 2fr .9fr .55fr .55fr .9fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 22px;
+}
+.origin-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.origin-badge.origin-manual { background: #f0eff4; color: #656375; }
+.origin-badge.origin-google { background: #e8f0fe; color: #1967d2; }
+.origin-badge.origin-meta { background: #e7f3ff; color: #0866ff; }
+.origin-badge.origin-linkedin { background: #e8f4fc; color: #0a66c2; }
+.origin-badge.origin-tiktok { background: #f3f0ff; color: #5b4b8a; }
+.origin-badge.origin-microsoft { background: #eef6f0; color: #107c10; }
+.origin-badge.origin-other { background: #f5f0ea; color: #7a5c45; }
 .client-delete-actions {
   padding-right: 18px;
 }
@@ -234,7 +257,7 @@ button { border: 0; font: inherit; cursor: pointer; }
   flex-shrink: 0;
 }
 .topbar-sync-note {
-  max-width: 180px;
+  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

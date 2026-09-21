@@ -33,6 +33,9 @@ Each provider is a card in `/websites/:id/integrations`.
 | `GOOGLE_ADS` | Google Ads | 1 | Google OAuth `adwords` + platform developer token | Customer ID (+ `login-customer-id` if MCC) |
 | `LINKEDIN_ADS` | LinkedIn Ads | later | LinkedIn OAuth | Ad account |
 | `TIKTOK_ADS` | TikTok Ads | later | TikTok OAuth | Advertiser |
+| `MICROSOFT_ADS` | Microsoft Advertising | later | Microsoft OAuth | Account |
+
+**Catalog source of truth:** `src/lib/integrations/catalog.js` seeds `integration_providers`. Provider / origin / snapshot keys are **open TEXT** (no closed CHECKs) so new rows do not need a schema rewrite. Provenance + domain ACL model: `docs/01-core/05-data-api/PROVENANCE_AND_INTEGRATIONS_SCHEMA.md`.
 
 **PoC implementation note:** One Google OAuth consent can request GA4 + GSC scopes together and create **two** `Connection` rows (or one `GOOGLE` row with both external ids). Prefer **one row per provider key** for a clean catalog UI.
 
@@ -144,7 +147,7 @@ Persist on `Connection.config_json` and/or `WebsiteOnboarding` (onboarding = bus
 ### 7. Sync
 
 - Backfill last 28 days (PoC); 90 later
-- Ongoing: stale-on-read (>6h) or cron
+- Ongoing: stale-on-read (>6h) when opening Overview / GA4 / GSC / Ads / Meta (`POST /integrations/sync-stale`); header Sync force-refreshes; cron still later
 - Respect onboarding channels; skip disconnected providers
 - Write `MetricSnapshot`; update `last_sync_at` / `last_error`
 

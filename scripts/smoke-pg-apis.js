@@ -69,6 +69,36 @@ async function main() {
 
   migrate();
   const db = getDb();
+
+  try {
+    const { hasColumn, tableExists } = require('../src/lib/db');
+    const { normalizeDomain, ORIGINS } = require('../src/lib/clientProvenance');
+    const { listCatalog } = require('../src/lib/integrations/catalog');
+    if (!hasColumn('clients', 'origin')) throw new Error('clients.origin missing');
+    if (!hasColumn('websites', 'primary_domain')) {
+      throw new Error('websites.primary_domain missing');
+    }
+    if (!tableExists('client_sources')) throw new Error('client_sources missing');
+    if (!tableExists('integration_providers')) {
+      throw new Error('integration_providers missing');
+    }
+    if (!tableExists('user_domain_access')) {
+      throw new Error('user_domain_access missing');
+    }
+    const seeded = db
+      .prepare(`SELECT COUNT(*) AS n FROM integration_providers`)
+      .get();
+    if (!seeded?.n) throw new Error('integration_providers empty');
+    const d = normalizeDomain('https://www.Example.com/path');
+    if (d !== 'example.com') throw new Error(`normalizeDomain got ${d}`);
+    ok(
+      'schema/provenance',
+      `origins=${ORIGINS.length} catalog=${listCatalog().length} providers=${seeded.n}`
+    );
+  } catch (e) {
+    fail('schema/provenance', e.message);
+  }
+
   const admin = db
     .prepare(`SELECT id FROM users WHERE role = 'ADMIN' ORDER BY id LIMIT 1`)
     .get();
@@ -190,6 +220,21 @@ async function main() {
       fail(path, r.json || r.status);
     } else {
       ok(path, r.status);
+    }
+  }
+
+  if (website) {
+    const stale = await req('POST', '/api/integrations/sync-stale', {
+      cookie,
+      body: { website_id: website.id, dry_run: true },
+    });
+    if (stale.status >= 400 || !stale.json?.ok || !stale.json?.dryRun) {
+      fail('/api/integrations/sync-stale', stale.json || stale.status);
+    } else {
+      ok(
+        '/api/integrations/sync-stale',
+        `fresh=${(stale.json.fresh || []).length} would=${(stale.json.would_sync || []).length}`
+      );
     }
   }
 

@@ -8,6 +8,12 @@ const {
   getConnection,
   publicConnection,
 } = require('../connections');
+const { createNotification } = require('../notifications');
+const {
+  setClientOriginIfNew,
+  recordClientSource,
+  sourceForProvider,
+} = require('../clientProvenance');
 const {
   getGa4PropertyWebsiteUrl,
   normalizeWebsiteUrl,
@@ -20,7 +26,6 @@ const {
   healGoogleWebsiteTokens,
   agencyGoogleStatus,
 } = require('./agency');
-const { createNotification } = require('../notifications');
 
 function hostKey(url) {
   try {
@@ -167,6 +172,14 @@ async function importGoogleAsset({
         };
       }
     }
+    recordClientSource({
+      clientId: site.client_id,
+      websiteId: site.id,
+      source: 'GOOGLE_ADS',
+      externalAccountId: accountId,
+      dataIdentityId,
+      createdByUserId: userId,
+    });
     return {
       ok: true,
       linked: true,
@@ -276,13 +289,15 @@ async function importGoogleAsset({
   if (!site) {
     const info = getDb()
       .prepare(
-        `INSERT INTO clients (name, website_url, timezone, currency)
-         VALUES (?, ?, 'Asia/Kolkata', 'INR')`
+        `INSERT INTO clients (
+           name, website_url, timezone, currency, origin, created_by_user_id
+         ) VALUES (?, ?, 'Asia/Kolkata', 'INR', 'GOOGLE', ?)`
       )
-      .run(cName, url);
+      .run(cName, url, userId);
     clientId = info.lastInsertRowid;
     site = createWebsite(clientId, { name, url });
     created = true;
+    setClientOriginIfNew(clientId, 'GOOGLE', userId);
   }
 
   upsertConnection({
@@ -301,6 +316,15 @@ async function importGoogleAsset({
   touchAdminGoogleToken(userId, encrypted);
   healGoogleWebsiteTokens(encrypted, userId, null, dataIdentityId);
   await probeAndActivate(site.id, provider, accessToken);
+
+  recordClientSource({
+    clientId,
+    websiteId: site.id,
+    source: sourceForProvider(provider),
+    externalAccountId: externalAccountId,
+    dataIdentityId,
+    createdByUserId: userId,
+  });
 
   let syncResult = null;
   if (syncAfter) {
@@ -337,6 +361,14 @@ async function importGoogleAsset({
         lastError: null,
       });
       await probeAndActivate(site.id, extraProvider, accessToken);
+      recordClientSource({
+        clientId,
+        websiteId: site.id,
+        source: sourceForProvider(extraProvider),
+        externalAccountId: id,
+        dataIdentityId,
+        createdByUserId: userId,
+      });
       if (syncAfter) {
         try {
           await syncProvider(site.id, extraProvider);

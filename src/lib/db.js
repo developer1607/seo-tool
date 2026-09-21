@@ -59,7 +59,37 @@ function execSchema() {
 }
 
 function migrate() {
+  // Add new columns before schema indexes that reference them (CREATE TABLE IF NOT EXISTS
+  // does not alter existing tables; CREATE INDEX would fail otherwise).
+  if (tableExists('clients')) {
+    if (!hasColumn('clients', 'origin')) {
+      getDb().exec(
+        `ALTER TABLE clients ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'MANUAL'`
+      );
+    }
+    if (!hasColumn('clients', 'created_by_user_id')) {
+      getDb().exec(
+        `ALTER TABLE clients
+         ADD COLUMN IF NOT EXISTS created_by_user_id BIGINT
+         REFERENCES users(id) ON DELETE SET NULL`
+      );
+    }
+    try {
+      getDb().exec(
+        `ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_origin_check`
+      );
+    } catch {
+      /* may not exist */
+    }
+  }
+  if (tableExists('websites') && !hasColumn('websites', 'primary_domain')) {
+    getDb().exec(
+      `ALTER TABLE websites ADD COLUMN IF NOT EXISTS primary_domain TEXT`
+    );
+  }
+
   execSchema();
+
   // Ensure optional columns exist on older PG DBs created mid-rollout
   if (tableExists('admin_google_tokens')) {
     if (!hasColumn('admin_google_tokens', 'google_email')) {
@@ -80,6 +110,12 @@ function migrate() {
        REFERENCES data_identities(id) ON DELETE SET NULL`
     );
   }
+  getDb().exec(
+    `CREATE INDEX IF NOT EXISTS idx_websites_primary_domain ON websites(primary_domain)`
+  );
+  getDb().exec(
+    `CREATE INDEX IF NOT EXISTS idx_clients_origin ON clients(origin)`
+  );
   // Widen notifications.layer CHECK to include 'WEBSITE'
   if (tableExists('notifications')) {
     try {
@@ -93,6 +129,22 @@ function migrate() {
     } catch {
       // constraint may already be correct
     }
+  }
+  try {
+    const {
+      backfillProvenance,
+      ensureClientSourcesTable,
+      ensureIntegrationProvidersTable,
+      ensureAccessStubTables,
+      dropProviderCheckConstraints,
+    } = require('./clientProvenance');
+    dropProviderCheckConstraints();
+    ensureIntegrationProvidersTable();
+    ensureClientSourcesTable();
+    ensureAccessStubTables();
+    backfillProvenance();
+  } catch (e) {
+    console.error('provenance backfill:', e.message || e);
   }
 }
 

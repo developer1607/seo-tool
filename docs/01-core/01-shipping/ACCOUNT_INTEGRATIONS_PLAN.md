@@ -1,7 +1,7 @@
 # Account → Integrations plan (Cursor-style)
 
 **Status:** In progress — Phases 0 / A / B / C shipped; **Phase D Meta Connect works in Dev** (scopes fixed); App Review / external BMs still open; E pending; **local Postgres cutover shipped**; **2026-09-17 docs + PG eval** (`DOC_AND_PG_EVAL-2026-09-17.md`)  
-**Updated:** 2026-09-17  
+**Updated:** 2026-09-21  
 **Product:** Webastral — admin-only agency SEO/reporting  
 **Goal:** Feel like Cursor: create/sign in to an account, then connect Google / Meta under **Integrations** — without confusing app login with data OAuth.
 
@@ -38,14 +38,15 @@ Related docs: `DEV_LOGBOOK.md`, `PHASES.md`, `DOC_AND_PG_EVAL-2026-09-17.md`, `.
 - [x] **PostgreSQL cutover (local)** - API uses `DATABASE_URL` + `db/schema.postgres.sql`; sync `pg` adapter; `npm run db:pg:start` (embedded UTF-8, port 5434, no Docker); `db:init` / `db:verify` / `db:migrate-sqlite`; legacy `db/app.sqlite` kept as backup; data migrated (clients + snapshots)
 - [x] **Mobile nav drawer** - hamburger + full sidebar/subnav at ≤760px
 - [x] **Meta Connect scopes (Dev)** - Login for Business OAuth uses `ads_read` + `business_management` only (dropped `email` / `public_profile`); `/me` = `id,name`; Connect works in Development for reports
+- [x] **Meta-only clients + provenance** - `clients.origin` / `client_sources` / `websites.primary_domain`; catalog-driven providers (`integration_providers`); Meta **Create client & link**; ACL stubs `user_client_access` / `user_domain_access` (no employee UI yet). Doc: `docs/01-core/05-data-api/PROVENANCE_AND_INTEGRATIONS_SCHEMA.md`
 
 ### Pending - not ready / not done
 
 - [ ] **Postgres prod / free deploy** - persistent managed Postgres (or durable volume for `DATABASE_URL`) before public URL; not embedded-only (`data/pg-utf8` is local-only)
-- [~] **Postgres SQL audit (full product smoke)** - API `smoke:pg` **23/23** on 2026-09-17; browser Login → Agency → Overview → PDF still unchecked; app SQL still uses `datetime('now')` rewritten by `pg-adapter.js`
-- [ ] **On-visit Sync** - when opening Overview / GA4 / GSC / Ads / Meta, refresh stale linked sources without relying only on header Sync
+- [~] **Postgres SQL audit (full product smoke)** - API `smoke:pg` **25/25** on 2026-09-21 (incl. schema/provenance); browser Login → Agency → Overview → PDF still unchecked; app SQL still uses `datetime('now')` rewritten by `pg-adapter.js`
+- [x] **On-visit Sync** - opening Overview / GA4 / GSC / Ads / Meta refreshes ACTIVE linked sources older than **6h** (or never synced); header Sync still force-refreshes; Meta skipped if `.env` unset
 - [ ] **Agency vs Clients content** - clarify portfolio ops vs research/list under the new shell
-- [ ] **Nightly / cron Sync** - still manual header Sync (deferred; on-visit Sync may cover day-to-day)
+- [ ] **Nightly / cron Sync** - still no scheduled job (deferred; on-visit Sync covers day-to-day)
 - [ ] **Phase D ops** - App Review / Business Verification / Tech Provider for external BMs; Meta Connect already works in **Development** with corrected scopes
 - [ ] **Phase E polish** - password reset, login rate limit, staging vs prod OAuth clients
 - [ ] **Google production verification** - sensitive-scope demo / verification for production client scale

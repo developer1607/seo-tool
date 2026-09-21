@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import AdminShell, { PageHeader } from "../../components/admin-shell";
 import AccessRevokedBanner from "../../components/access-revoked-banner";
+import { OriginBadge } from "../../components/origin-badge";
 import { api, type Client, type Website } from "../../../lib/api";
 import { useGoogleAccessVerify } from "../../../lib/use-google-access-verify";
 import { useSession } from "../../providers";
@@ -195,7 +196,16 @@ export default function ClientDetailsPage() {
       <div className="page-content">
         <PageHeader
           eyebrow={`CLIENTS / ${(client?.name || "…").toUpperCase()}`}
-          title={client?.name || "Client"}
+          title={
+            client ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                {client.name}
+                <OriginBadge origin={client.origin} />
+              </span>
+            ) : (
+              "Client"
+            )
+          }
           description={
             client
               ? `${sites.length} website${sites.length === 1 ? "" : "s"} · account health & rollup`

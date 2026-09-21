@@ -45,6 +45,12 @@ docs/04-audits-archive/01-handoffs|02-portal-audits|03-research
 
 ## Working instinct log
 
+- **2026-09-21** — Meta-only = create client + user-supplied website URL (Meta has none). `clients.origin` = first family only (never overwrite). New platforms = catalog.js row + open TEXT keys — no CHECK rewrite. Domain ACL later uses `websites.primary_domain` + stub `user_domain_access`.
+
+- **2026-09-18** — Meta hub matches Google: Manage Meta inventory, identity chips, add/reconnect, website Link picker. Ads stay per-website (no GA4-style bulk import).
+
+- **2026-09-18** — On-visit Sync: Overview + platform pages refresh ACTIVE sources older than 6h via `POST /integrations/sync-stale`; header Sync remains a force refresh. Do not cron until asked.
+
 - **2026-09-17** — After PG cutover: live DDL is `db/schema.postgres.sql`; local PG is embedded **5434** (`npm run db:pg:start`), not Docker 5432. Empty `website_onboarding` / `client_invites` is expected (EJS routers unmounted). `views.js` is live. Do not re-run `db:migrate-sqlite` on a healthy DB. Full eval: `docs/01-core/01-shipping/DOC_AND_PG_EVAL-2026-09-17.md`.
 
 - **2026-09-16** — DB is PostgreSQL (DATABASE_URL); local without Docker = npm run db:pg:start (embedded UTF-8, port 5434).

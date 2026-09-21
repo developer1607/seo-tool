@@ -4,8 +4,13 @@ const express = require('express');
 const { getDb } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
 const { listClients, getClient } = require('../lib/clients');
+const { createWebsite } = require('../lib/websites');
 const { setSession, readSession } = require('../lib/session');
 const { createNotification } = require('../lib/notifications');
+const {
+  setClientOriginIfNew,
+  recordClientSource,
+} = require('../lib/clientProvenance');
 
 const router = express.Router();
 
@@ -44,10 +49,34 @@ router.post('/clients', (req, res) => {
 
   const info = getDb()
     .prepare(
-      `INSERT INTO clients (name, website_url, brand_primary, brand_secondary, timezone, currency)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO clients (
+         name, website_url, brand_primary, brand_secondary, timezone, currency,
+         origin, created_by_user_id
+       ) VALUES (?, ?, ?, ?, ?, ?, 'MANUAL', ?)`
     )
-    .run(name, website_url, brand_primary, brand_secondary, timezone, currency);
+    .run(
+      name,
+      website_url,
+      brand_primary,
+      brand_secondary,
+      timezone,
+      currency,
+      req.user.id
+    );
+  setClientOriginIfNew(info.lastInsertRowid, 'MANUAL', req.user.id);
+  const site = createWebsite(info.lastInsertRowid, {
+    name,
+    url: website_url,
+    timezone,
+    currency,
+  });
+  recordClientSource({
+    clientId: info.lastInsertRowid,
+    websiteId: site?.id,
+    source: 'MANUAL',
+    externalAccountId: '',
+    createdByUserId: req.user.id,
+  });
 
   createNotification({
     userId: req.user.id,
@@ -65,6 +94,7 @@ router.post('/clients', (req, res) => {
     userId: req.user.id,
     role: req.user.role,
     selectedClientId: info.lastInsertRowid,
+    selectedWebsiteId: site?.id || null,
   });
   res.redirect('/');
 });

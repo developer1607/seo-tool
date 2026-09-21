@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS auth_identities (
   UNIQUE (provider, provider_sub)
 );
 
+-- origin = first platform family (never overwritten). Open TEXT — see catalog.js.
 CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -34,6 +35,8 @@ CREATE TABLE IF NOT EXISTS clients (
   timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata',
   currency TEXT NOT NULL DEFAULT 'INR',
   notes TEXT NOT NULL DEFAULT '',
+  origin TEXT NOT NULL DEFAULT 'MANUAL',
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -43,6 +46,7 @@ CREATE TABLE IF NOT EXISTS websites (
   client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   url TEXT NOT NULL,
+  primary_domain TEXT,
   timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata',
   currency TEXT NOT NULL DEFAULT 'INR',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -52,7 +56,7 @@ CREATE TABLE IF NOT EXISTS websites (
 CREATE TABLE IF NOT EXISTS data_identities (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  provider TEXT NOT NULL CHECK (provider IN ('google', 'meta')),
+  provider TEXT NOT NULL,
   provider_sub TEXT NOT NULL DEFAULT '',
   email TEXT,
   display_name TEXT,
@@ -67,17 +71,40 @@ CREATE TABLE IF NOT EXISTS data_identities (
   UNIQUE (user_id, provider, provider_sub)
 );
 
+CREATE TABLE IF NOT EXISTS integration_providers (
+  provider_key TEXT PRIMARY KEY,
+  family TEXT NOT NULL,
+  label TEXT NOT NULL,
+  phase TEXT NOT NULL DEFAULT 'later',
+  auth_kind TEXT NOT NULL DEFAULT '',
+  source_key TEXT NOT NULL,
+  identity_provider TEXT,
+  metric_source TEXT,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  meta_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS client_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  website_id INTEGER REFERENCES websites(id) ON DELETE SET NULL,
+  source TEXT NOT NULL,
+  family TEXT NOT NULL DEFAULT 'OTHER',
+  external_account_id TEXT NOT NULL DEFAULT '',
+  data_identity_id INTEGER REFERENCES data_identities(id) ON DELETE SET NULL,
+  created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  meta_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (client_id, source, external_account_id)
+);
+
 CREATE TABLE IF NOT EXISTS connections (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   website_id INTEGER NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-  provider TEXT NOT NULL
-    CHECK (provider IN (
-      'GOOGLE_ANALYTICS',
-      'GOOGLE_SEARCH_CONSOLE',
-      'META_ADS',
-      'GOOGLE_ADS'
-    )),
+  provider TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'NOT_STARTED'
     CHECK (status IN (
       'NOT_STARTED',
@@ -109,13 +136,7 @@ CREATE TABLE IF NOT EXISTS metric_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   website_id INTEGER NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-  source TEXT NOT NULL
-    CHECK (source IN (
-      'GOOGLE_SEARCH_CONSOLE',
-      'GOOGLE_ANALYTICS',
-      'META_ADS',
-      'GOOGLE_ADS'
-    )),
+  source TEXT NOT NULL,
   date TEXT NOT NULL,
   spend REAL,
   impressions REAL,
@@ -184,5 +205,26 @@ CREATE TABLE IF NOT EXISTS admin_meta_tokens (
   meta_name TEXT,
   meta_email TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Future employee / multi-tenant ACL (schema only — no UI yet).
+CREATE TABLE IF NOT EXISTS user_client_access (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'VIEWER',
+  granted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, client_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_domain_access (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  primary_domain TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'VIEWER',
+  granted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (user_id, primary_domain)
 );
 

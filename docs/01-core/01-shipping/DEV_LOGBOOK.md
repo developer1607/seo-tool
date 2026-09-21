@@ -44,6 +44,111 @@ One sentence.
 
 ---
 
+## 2026-09-21 — Meta-only clients + expandable provenance schema
+
+### Goal
+Meta-only create+link (user supplies website URL), tag every client by first provenance, and open the schema so LinkedIn / TikTok / Microsoft can plug in later without CHECK rewrites. Log research + ACL stubs for future employee domain access.
+
+### Done
+- **Catalog-driven integrations:** `src/lib/integrations/catalog.js` + seeded `integration_providers` (Google / Meta enabled; LinkedIn / TikTok / Microsoft `enabled=0`)
+- **Open TEXT keys:** dropped closed CHECKs on `clients.origin`, `connections.provider`, `metric_snapshots.source`, `client_sources.source`, `data_identities.provider`
+- **Provenance:** `clients.origin` + `created_by_user_id`; `client_sources` (+ `family`, `meta_json`); `websites.primary_domain`
+- **ACL stubs (no UI):** `user_client_access`, `user_domain_access`
+- **Meta-only path:** `POST /integrations/meta/import` + Manage Meta → **Create client & link**
+- **Write-path tags:** Manual / Google import / Meta create+link / Meta link-to-existing
+- **UI:** Clients origin badges (Manual / Google / Meta / …)
+- **Research doc:** `docs/01-core/05-data-api/PROVENANCE_AND_INTEGRATIONS_SCHEMA.md`
+
+### How (for replication)
+- Schema: `db/schema.postgres.sql` (+ `db/schema.sql` parity); migrate in `src/lib/db.js` + `clientProvenance.backfillProvenance`
+- Helpers: `normalizeDomain`, `setClientOriginIfNew` (never overwrite non-MANUAL), `recordClientSource`
+- Meta: `src/lib/meta/importAsset.js` (`importMetaAsClient`, `linkMetaToWebsite`); route in `src/routes/meta.js`
+- Google / Manual: `src/lib/google/importAsset.js`, `POST /api/clients`
+- UI: `web/app/integrations/meta-inventory.tsx`, `web/app/clients/page.tsx`, `origin-badge.tsx`
+
+### Checklist impact
+- Moved Meta-only + provenance → Done (`ACCOUNT_INTEGRATIONS_PLAN.md`)
+
+### Smoke
+- `npm run smoke:pg` (includes `schema/provenance`)
+- Manual: Integrations → Meta → Create client & link → Clients shows **Meta** badge; link Meta onto Google client keeps origin **Google**
+
+### Do not
+- Do not re-add closed provider CHECKs
+- Do not ship employee multi-tenant UI this pass (stubs only)
+
+---
+
+## 2026-09-18 — Meta integrations match Google hub
+
+### Goal
+Make Meta connect / inventory / link as fluid as Google (Ads-style: identity → list → link to website).
+
+### Done
+- Meta card: Connect / Manage / Add account / Reconnect / Disconnect (same pattern as Google)
+- Manage Meta inventory: identity chips, Sync accounts, Available vs Linked, client+website picker, Link to website
+- OAuth supports add / replace / reconnect; disconnect one identity without wiping others
+- Website links: Choose Meta account picker + Save & sync (not only a bounce to Accounts)
+- Needs reconnect honesty on the Meta status badge
+
+### How (for replication)
+- `src/lib/meta/oauth.js` — `connectMode` + `identityId` in OAuth state
+- `src/lib/meta/agency.js` — identities default/disconnect + `needsReauth`
+- `src/routes/meta.js` — `/accounts?identity_id=`, `/identities/default`, disconnect `identity_id`
+- `web/app/integrations/meta-inventory.tsx` + hub card in `integrations-inner.tsx`
+- Website picker: `website-bindings.tsx`
+
+### Checklist impact
+- Phase D Dev Connect already done; App Review / external BMs still pending
+- No change to Postgres prod / cron / Phase E
+
+### Smoke
+1. Integrations → Connect Meta → lands on Manage Meta
+2. Sync accounts → pick client + website → Link to website
+3. Website links → Choose Meta account → Save & sync Meta
+4. Add account keeps the previous Meta login
+
+### Do not
+- Meta App Review / Business Verification
+- Bulk-import Meta like GA4 (Ads stay per-website, same as Google Ads)
+
+---
+
+## 2026-09-18 — On-visit Sync for performance pages
+
+### Goal
+Refresh stale linked sources when opening Overview / GA4 / GSC / Ads / Meta, without relying only on header Sync.
+
+### Done
+- `POST /api/integrations/sync-stale` syncs ACTIVE connections older than **6 hours** (or never synced)
+- Overview refreshes all linked sources; each platform page refreshes that channel
+- Cached KPIs stay on screen; header shows **Refreshing…** if the call takes >800ms, then **Updated …** or reconnect errors
+- Header **Sync** still force-refreshes; Meta skipped when `.env` is unset; `NEEDS_REAUTH` is not retried
+- `smoke:pg` includes dry-run of the new endpoint
+
+### How (for replication)
+- `src/lib/google/staleSync.js` — staleness + skip rules
+- `src/lib/google/sync.js` — in-flight dedupe per website+provider
+- `src/routes/google.js` — `POST /integrations/sync-stale` (`dry_run` for smoke)
+- `web/app/components/admin-shell.tsx` — fires on performance routes; dispatches `webastral:synced` so pages reload snapshots
+
+### Checklist impact
+- On-visit Sync → **Done**
+- Nightly / cron Sync still pending (day-to-day covered by on-visit)
+
+### Smoke
+1. Open Overview with a linked website whose last sync is >6h or empty → header may show Refreshing… then Updated GA4 · GSC (etc.)
+2. Re-open immediately → silent (fresh); KPIs unchanged
+3. Header Sync still force-refreshes
+4. `npm run smoke:pg` includes `/api/integrations/sync-stale` dry_run
+
+### Do not
+- Cron / nightly job
+- Sync on Agency / Clients / Settings
+- Notify on every successful stale refresh
+
+---
+
 ## 2026-09-17 — Full docs eval + post-Postgres gap check
 
 ### Goal

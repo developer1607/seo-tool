@@ -1,29 +1,23 @@
 'use client';
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AdminShell, { PageHeader } from "../components/admin-shell";
 import { api } from "../../lib/api";
 import { useSession } from "../providers";
 import GoogleInventory from "./google-inventory";
+import MetaInventory from "./meta-inventory";
 import WebsiteBindings from "./website-bindings";
 
 type HubTab = "accounts" | "website";
-
-type MetaAccount = {
-  id: string;
-  name: string;
-  currency?: string | null;
-  linked?: { website_id: number; client_id: number } | null;
-};
 
 function normalizeTab(
   raw: string | null,
   hasWebsiteId: boolean
 ): HubTab {
   if (raw === "website" || raw === "bind") return "website";
-  if (raw === "google" || raw === "import") return "accounts";
+  if (raw === "google" || raw === "import" || raw === "meta") return "accounts";
   if (raw === "services" || raw === "home" || raw === "accounts") {
     return "accounts";
   }
@@ -42,9 +36,14 @@ function wantsGoogleManage(search: URLSearchParams): boolean {
   );
 }
 
+function wantsMetaManage(search: URLSearchParams): boolean {
+  const tab = search.get("tab");
+  const view = search.get("view");
+  return view === "meta" || tab === "meta" || search.get("meta") === "1";
+}
+
 export default function IntegrationsInner() {
-  const { platform, refresh, clients, selectedClient, selectedWebsite } =
-    useSession();
+  const { platform, refresh } = useSession();
   const search = useSearchParams();
   const router = useRouter();
   const websiteIdQ = Number(search.get("website_id") || 0) || null;
@@ -54,20 +53,10 @@ export default function IntegrationsInner() {
   const [manageGoogle, setManageGoogle] = useState(() =>
     wantsGoogleManage(search)
   );
+  const [manageMeta, setManageMeta] = useState(() => wantsMetaManage(search));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [metaAccounts, setMetaAccounts] = useState<MetaAccount[]>([]);
-  const [metaAccountId, setMetaAccountId] = useState<string>("");
-  const [metaTargetClientId, setMetaTargetClientId] = useState<number | "">(
-    ""
-  );
-  const [metaTargetWebsiteId, setMetaTargetWebsiteId] = useState<number | "">(
-    ""
-  );
-  const [metaSites, setMetaSites] = useState<{ id: number; name: string }[]>(
-    []
-  );
 
   const agency = platform?.agencyGoogle;
   const agencyLinked = Boolean(
@@ -76,25 +65,14 @@ export default function IntegrationsInner() {
   const agencyNeedsReauth = Boolean(agency?.needsReauth);
   const meta = platform?.agencyMeta;
   const metaLinked = Boolean(meta?.linked && !meta?.cleared);
+  const metaNeedsReauth = Boolean(meta?.needsReauth);
   const googleConfigured = Boolean(platform?.google);
   const metaConfigured = Boolean(platform?.meta);
-
-  const unlinkedMeta = useMemo(
-    () => metaAccounts.filter((a) => !a.linked),
-    [metaAccounts]
-  );
-  const linkedMeta = useMemo(
-    () => metaAccounts.filter((a) => a.linked),
-    [metaAccounts]
-  );
-  const selectedMeta = useMemo(
-    () => unlinkedMeta.find((a) => a.id === metaAccountId) || null,
-    [unlinkedMeta, metaAccountId]
-  );
 
   useEffect(() => {
     setTab(normalizeTab(search.get("tab"), Boolean(websiteIdQ)));
     setManageGoogle(wantsGoogleManage(search));
+    setManageMeta(wantsMetaManage(search));
   }, [search, websiteIdQ]);
 
   useEffect(() => {
@@ -104,12 +82,13 @@ export default function IntegrationsInner() {
       setMessage("Google connected. Sync accounts, then import or link.");
       setTab("accounts");
       setManageGoogle(true);
+      setManageMeta(false);
     }
     if (search.get("meta") === "1") {
-      setMessage("Meta connected. Choose an ad account and link it below.");
+      setMessage("Meta connected. Sync ad accounts, then link to a website.");
       setTab("accounts");
       setManageGoogle(false);
-      loadMetaAccounts().catch(() => undefined);
+      setManageMeta(true);
     }
     if (
       typeof window !== "undefined" &&
@@ -123,7 +102,7 @@ export default function IntegrationsInner() {
       url.searchParams.delete("meta_error");
       if (search.get("meta") === "1") {
         url.searchParams.set("tab", "accounts");
-        url.searchParams.delete("view");
+        url.searchParams.set("view", "meta");
       } else if (search.get("google") === "1") {
         url.searchParams.set("tab", "accounts");
         url.searchParams.set("view", "google");
@@ -132,72 +111,22 @@ export default function IntegrationsInner() {
     }
   }, [search, websiteIdQ]);
 
-  const loadMetaAccounts = useCallback(async () => {
-    if (!metaLinked) {
-      setMetaAccounts([]);
-      setMetaAccountId("");
-      return;
-    }
-    try {
-      const d = await api<{
-        accounts: MetaAccount[];
-        error?: string;
-      }>("/integrations/meta/accounts");
-      const rows = d.accounts || [];
-      setMetaAccounts(rows);
-      if (d.error) setError(d.error);
-      setMetaAccountId((prev) => {
-        const still = rows.find((a) => a.id === prev && !a.linked);
-        if (still) return still.id;
-        const first = rows.find((a) => !a.linked);
-        return first?.id || "";
-      });
-    } catch (e) {
-      setMetaAccounts([]);
-      setMetaAccountId("");
-      setError((e as Error).message);
-    }
-  }, [metaLinked]);
-
-  useEffect(() => {
-    if (tab === "accounts" && metaLinked) {
-      loadMetaAccounts().catch(() => undefined);
-    }
-  }, [tab, metaLinked, loadMetaAccounts]);
-
-  useEffect(() => {
-    if (metaTargetClientId || !selectedClient?.id) return;
-    setMetaTargetClientId(selectedClient.id);
-    api<{ websites: { id: number; name: string }[] }>(
-      `/clients/${selectedClient.id}/research`
-    )
-      .then((d) => {
-        const sites = (d.websites || []).map((w) => ({
-          id: w.id,
-          name: w.name,
-        }));
-        setMetaSites(sites);
-        if (
-          selectedWebsite?.id &&
-          sites.some((s) => s.id === selectedWebsite.id)
-        ) {
-          setMetaTargetWebsiteId(selectedWebsite.id);
-        } else if (sites.length === 1) {
-          setMetaTargetWebsiteId(sites[0].id);
-        }
-      })
-      .catch(() => undefined);
-  }, [selectedClient?.id, selectedWebsite?.id, metaTargetClientId]);
-
   const goTab = useCallback(
-    (next: HubTab, opts?: { manageGoogle?: boolean }) => {
+    (
+      next: HubTab,
+      opts?: { manageGoogle?: boolean; manageMeta?: boolean }
+    ) => {
       setTab(next);
-      const showManage = Boolean(opts?.manageGoogle);
-      setManageGoogle(showManage);
+      const showGoogle = Boolean(opts?.manageGoogle);
+      const showMeta = Boolean(opts?.manageMeta);
+      setManageGoogle(showGoogle);
+      setManageMeta(showMeta);
       const url = new URL(window.location.href);
       url.searchParams.set("tab", next);
       if (next !== "website") url.searchParams.delete("website_id");
-      if (next === "accounts" && showManage) {
+      if (next === "accounts" && showMeta) {
+        url.searchParams.set("view", "meta");
+      } else if (next === "accounts" && showGoogle) {
         url.searchParams.set("view", "google");
       } else {
         url.searchParams.delete("view");
@@ -252,12 +181,17 @@ export default function IntegrationsInner() {
     }
   }
 
-  async function connectMeta() {
+  async function connectMeta(opts?: { mode?: "replace" | "add" }) {
+    const mode = opts?.mode || "replace";
     setBusy(true);
     setError("");
     try {
+      const params = new URLSearchParams({
+        format: "json",
+        connect: mode,
+      });
       const d = await api<{ url: string }>(
-        "/integrations/meta/start?format=json"
+        `/integrations/meta/start?${params.toString()}`
       );
       window.location.href = d.url;
     } catch (e) {
@@ -267,7 +201,13 @@ export default function IntegrationsInner() {
   }
 
   async function disconnectMeta() {
-    if (!window.confirm("Disconnect Meta data access?")) return;
+    if (
+      !window.confirm(
+        "Disconnect Meta data access? Website links stay; Connect again to browse ad accounts."
+      )
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       await api("/integrations/meta/agency/disconnect", {
@@ -275,41 +215,8 @@ export default function IntegrationsInner() {
         body: "{}",
       });
       setMessage("Meta disconnected.");
-      setMetaAccounts([]);
-      setMetaAccountId("");
+      setManageMeta(false);
       await refresh();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function linkSelectedMeta() {
-    if (!selectedMeta) {
-      setError("Choose a Meta ad account to link.");
-      return;
-    }
-    const websiteId = Number(metaTargetWebsiteId || 0);
-    if (!websiteId) {
-      setError("Choose a website, then link this Meta ad account.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      await api("/integrations/meta/select", {
-        method: "POST",
-        body: JSON.stringify({
-          website_id: websiteId,
-          external_account_id: selectedMeta.id,
-          external_account_name: selectedMeta.name,
-          sync: true,
-        }),
-      });
-      await refresh();
-      await loadMetaAccounts();
-      setMessage(`Linked ${selectedMeta.name} to website ${websiteId}`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -495,11 +402,19 @@ export default function IntegrationsInner() {
                     <p className="muted">Ads insights</p>
                   </div>
                   <b
-                    className={`status ${metaLinked ? "active" : "attention"}`}
+                    className={`status ${
+                      metaNeedsReauth
+                        ? "attention"
+                        : metaLinked
+                          ? "active"
+                          : "attention"
+                    }`}
                   >
-                    {metaLinked
-                      ? meta?.name || meta?.email || "Connected"
-                      : "Not connected"}
+                    {metaNeedsReauth
+                      ? "Needs reconnect"
+                      : metaLinked
+                        ? meta?.name || meta?.email || "Connected"
+                        : "Not connected"}
                   </b>
                 </div>
                 <div
@@ -515,185 +430,82 @@ export default function IntegrationsInner() {
                     <Link className="secondary-button" href="/settings">
                       Configure Meta in Settings
                     </Link>
-                  ) : metaLinked ? (
-                    <span
-                      className="muted"
-                      style={{
-                        display: "inline-flex",
-                        gap: 10,
-                        flexWrap: "wrap",
-                        alignItems: "center",
+                  ) : metaNeedsReauth ? (
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={busy}
+                      onClick={() => {
+                        connectMeta({ mode: "replace" }).catch(() => undefined);
                       }}
                     >
+                      {busy ? "Redirecting…" : "Reconnect"}
+                    </button>
+                  ) : metaLinked ? (
+                    <>
                       <button
                         type="button"
-                        className="text-button"
-                        disabled={busy}
-                        onClick={() => {
-                          connectMeta().catch(() => undefined);
+                        className="primary-button"
+                        onClick={() => goTab("accounts", { manageMeta: true })}
+                      >
+                        Manage Meta
+                      </button>
+                      <span
+                        className="muted"
+                        style={{
+                          display: "inline-flex",
+                          gap: 10,
+                          flexWrap: "wrap",
+                          alignItems: "center",
                         }}
                       >
-                        Reconnect
-                      </button>
-                      <button
-                        type="button"
-                        className="text-button"
-                        disabled={busy}
-                        onClick={() => {
-                          disconnectMeta().catch(() => undefined);
-                        }}
-                      >
-                        Disconnect
-                      </button>
-                    </span>
+                        <button
+                          type="button"
+                          className="text-button"
+                          disabled={busy}
+                          onClick={() => {
+                            connectMeta({ mode: "add" }).catch(() => undefined);
+                          }}
+                        >
+                          Add account
+                        </button>
+                        <button
+                          type="button"
+                          className="text-button"
+                          disabled={busy}
+                          onClick={() => {
+                            connectMeta({ mode: "replace" }).catch(
+                              () => undefined
+                            );
+                          }}
+                        >
+                          Reconnect
+                        </button>
+                        <button
+                          type="button"
+                          className="text-button"
+                          disabled={busy}
+                          onClick={() => {
+                            disconnectMeta().catch(() => undefined);
+                          }}
+                        >
+                          Disconnect
+                        </button>
+                      </span>
+                    </>
                   ) : (
                     <button
                       type="button"
                       className="primary-button"
                       disabled={busy}
                       onClick={() => {
-                        connectMeta().catch(() => undefined);
+                        connectMeta({ mode: "replace" }).catch(() => undefined);
                       }}
                     >
                       {busy ? "Redirecting…" : "Connect Meta"}
                     </button>
                   )}
                 </div>
-
-                {metaLinked && (
-                  <div style={{ padding: "8px 4px 0" }}>
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: 10,
-                        marginBottom: 12,
-                        alignItems: "center",
-                      }}
-                    >
-                      <label className="muted" htmlFor="meta-account">
-                        Ad account
-                      </label>
-                      <select
-                        id="meta-account"
-                        value={metaAccountId}
-                        onChange={(e) => setMetaAccountId(e.target.value)}
-                        style={{ minHeight: 40, minWidth: 220 }}
-                      >
-                        <option value="">
-                          {unlinkedMeta.length
-                            ? "Select ad account…"
-                            : "No unlinked accounts"}
-                        </option>
-                        {unlinkedMeta.map((row) => (
-                          <option key={row.id} value={row.id}>
-                            {row.name}
-                            {row.currency ? ` · ${row.currency}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="text-button"
-                        disabled={busy}
-                        title="Refresh account list"
-                        onClick={() => {
-                          loadMetaAccounts().catch(() => undefined);
-                        }}
-                      >
-                        Refresh
-                      </button>
-                      <label className="muted" htmlFor="meta-client">
-                        Client
-                      </label>
-                      <select
-                        id="meta-client"
-                        value={metaTargetClientId}
-                        onChange={(e) => {
-                          const cid = Number(e.target.value);
-                          setMetaTargetClientId(cid || "");
-                          setMetaTargetWebsiteId("");
-                          setMetaSites([]);
-                          if (!cid) return;
-                          api<{ websites: { id: number; name: string }[] }>(
-                            `/clients/${cid}/research`
-                          )
-                            .then((d) => {
-                              const sites = (d.websites || []).map((w) => ({
-                                id: w.id,
-                                name: w.name,
-                              }));
-                              setMetaSites(sites);
-                              if (sites.length === 1) {
-                                setMetaTargetWebsiteId(sites[0].id);
-                              }
-                            })
-                            .catch((err) => setError(err.message));
-                        }}
-                        style={{ minHeight: 40, minWidth: 160 }}
-                      >
-                        <option value="">Select client…</option>
-                        {(clients || []).map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                      <label className="muted" htmlFor="meta-site">
-                        Website
-                      </label>
-                      <select
-                        id="meta-site"
-                        value={metaTargetWebsiteId}
-                        onChange={(e) =>
-                          setMetaTargetWebsiteId(
-                            e.target.value ? Number(e.target.value) : ""
-                          )
-                        }
-                        style={{ minHeight: 40, minWidth: 200 }}
-                      >
-                        <option value="">Select website…</option>
-                        {metaSites.map((w) => (
-                          <option key={w.id} value={w.id}>
-                            {w.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="primary-button"
-                        disabled={
-                          busy ||
-                          !selectedMeta ||
-                          !Number(metaTargetWebsiteId || 0)
-                        }
-                        onClick={() => {
-                          linkSelectedMeta().catch(() => undefined);
-                        }}
-                      >
-                        {busy ? "Linking…" : "Link to website"}
-                      </button>
-                    </div>
-                    {linkedMeta.length > 0 && (
-                      <p className="muted" style={{ margin: "0 0 8px" }}>
-                        Already linked:{" "}
-                        {linkedMeta
-                          .slice(0, 5)
-                          .map((a) => a.name)
-                          .join(", ")}
-                        {linkedMeta.length > 5
-                          ? ` +${linkedMeta.length - 5} more`
-                          : ""}
-                      </p>
-                    )}
-                    {!metaAccounts.length && (
-                      <p className="muted" style={{ margin: 0 }}>
-                        No ad accounts returned — check Meta app permissions
-                        (ads_read) and Business access.
-                      </p>
-                    )}
-                  </div>
-                )}
               </section>
             </div>
 
@@ -721,6 +533,33 @@ export default function IntegrationsInner() {
                   </button>
                 </div>
                 <GoogleInventory hideChrome />
+              </section>
+            )}
+
+            {manageMeta && metaLinked && (
+              <section style={{ marginTop: 20 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 12,
+                    marginBottom: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <h2 style={{ margin: 0, fontSize: "1.1rem" }}>
+                    Meta accounts
+                  </h2>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => goTab("accounts")}
+                  >
+                    Hide inventory
+                  </button>
+                </div>
+                <MetaInventory hideChrome />
               </section>
             )}
           </>

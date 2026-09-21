@@ -6,10 +6,13 @@ const {
   ensureDataIdentitiesTable,
   getDefaultIdentity,
   getIdentityForUser,
+  getIdentity,
   upsertIdentity,
   listIdentities,
   clearIdentity,
   publicIdentity,
+  setDefaultIdentity,
+  setIdentityNeedsReauth,
 } = require('../identities/data');
 
 const CLEARED = '["__cleared__"]';
@@ -206,16 +209,29 @@ function getMetaAccessTokenPlain(userId, identityId = null) {
     err.code = 'NOT_CONNECTED';
     throw err;
   }
-  return decrypt(found.encrypted);
+  try {
+    return decrypt(found.encrypted);
+  } catch {
+    if (found.identityId) setIdentityNeedsReauth(userId, found.identityId);
+    const err = new Error(
+      'Stored Meta token cannot be read. Reconnect Meta under Integrations.'
+    );
+    err.code = 'NEEDS_REAUTH';
+    throw err;
+  }
 }
 
 function agencyMetaStatus(userId) {
   ensureDataIdentitiesTable();
   const identities = listIdentities(userId, 'meta');
+  const needsReauth = identities.some(
+    (i) => i.status === 'needs_reauth' || (i.isDefault && !i.hasToken)
+  );
   if (!identities.length) {
     return {
       linked: false,
       cleared: true,
+      needsReauth: false,
       name: null,
       email: null,
       updatedAt: null,
@@ -228,12 +244,40 @@ function agencyMetaStatus(userId) {
   return {
     linked: Boolean(found),
     cleared: false,
-    name: found?.metaName || def?.display_name || null,
-    email: found?.metaEmail || def?.email || null,
-    updatedAt: found?.updatedAt || def?.updated_at || null,
-    identityId: found?.identityId || def?.id || null,
+    needsReauth,
+    name: found?.metaName || def?.display_name || identities[0]?.displayName || null,
+    email: found?.metaEmail || def?.email || identities[0]?.email || null,
+    updatedAt: found?.updatedAt || def?.updated_at || identities[0]?.updatedAt || null,
+    identityId: found?.identityId || def?.id || identities[0]?.id || null,
     identities,
   };
+}
+
+function listMetaDataIdentities(userId) {
+  return listIdentities(userId, 'meta');
+}
+
+function setDefaultMetaIdentity(userId, identityId) {
+  const existing = getIdentity(identityId);
+  if (!existing || existing.user_id !== userId || existing.provider !== 'meta') {
+    const err = new Error('Identity not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  const row = setDefaultIdentity(userId, identityId);
+  mirrorDefaultToAdminTable(userId);
+  return publicIdentity(row);
+}
+
+function disconnectMetaIdentity(userId, identityId) {
+  const result = clearIdentity(userId, identityId);
+  mirrorDefaultToAdminTable(userId);
+  return result;
+}
+
+function markMetaIdentityNeedsReauth(userId, identityId) {
+  if (!identityId) return null;
+  return setIdentityNeedsReauth(userId, identityId);
 }
 
 module.exports = {
@@ -246,4 +290,8 @@ module.exports = {
   agencyMetaStatus,
   tokenReadable,
   publicIdentity,
+  listMetaDataIdentities,
+  setDefaultMetaIdentity,
+  disconnectMetaIdentity,
+  markMetaIdentityNeedsReauth,
 };

@@ -105,6 +105,53 @@ function findActiveItem(pathname: string): NavItem | undefined {
   return undefined;
 }
 
+const DATA_PROVIDERS = [
+  "GOOGLE_ANALYTICS",
+  "GOOGLE_SEARCH_CONSOLE",
+  "GOOGLE_ADS",
+  "META_ADS",
+] as const;
+
+const PROVIDER_LABELS: Record<string, string> = {
+  GOOGLE_ANALYTICS: "GA4",
+  GOOGLE_SEARCH_CONSOLE: "GSC",
+  GOOGLE_ADS: "Ads",
+  META_ADS: "Meta",
+};
+
+type StaleSyncResult = {
+  ok?: boolean;
+  synced?: { provider: string; days?: number }[];
+  skipped?: { provider: string; reason?: string }[];
+  failed?: { provider: string; error?: string; reason?: string }[];
+  fresh?: { provider: string }[];
+};
+
+const visitSyncInflight = new Map<string, Promise<StaleSyncResult>>();
+
+function staleSyncProvidersForPath(pathname: string): string[] | null {
+  if (pathname === "/") return [...DATA_PROVIDERS];
+  if (pathname === "/platforms/ga4") return ["GOOGLE_ANALYTICS"];
+  if (pathname === "/platforms/gsc") return ["GOOGLE_SEARCH_CONSOLE"];
+  if (pathname === "/platforms/google-ads") return ["GOOGLE_ADS"];
+  if (pathname === "/platforms/meta") return ["META_ADS"];
+  return null;
+}
+
+function requestVisitSync(websiteId: number, providers: string[]) {
+  const key = `${websiteId}:${providers.slice().sort().join(",")}`;
+  const existing = visitSyncInflight.get(key);
+  if (existing) return existing;
+  const pending = api<StaleSyncResult>("/integrations/sync-stale", {
+    method: "POST",
+    body: JSON.stringify({ website_id: websiteId, providers }),
+  }).finally(() => {
+    visitSyncInflight.delete(key);
+  });
+  visitSyncInflight.set(key, pending);
+  return pending;
+}
+
 export default function AdminShell({
   children,
   title,
@@ -132,6 +179,7 @@ export default function AdminShell({
   } = useSession();
   const [notifOpen, setNotifOpen] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [visitBusy, setVisitBusy] = useState(false);
   const [syncNote, setSyncNote] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
@@ -158,6 +206,73 @@ export default function AdminShell({
   useEffect(() => {
     setMobileNavOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!user?.id || !selectedWebsite?.id) return;
+    const wanted = staleSyncProvidersForPath(pathname);
+    if (!wanted) return;
+    const providers = platform?.meta
+      ? wanted
+      : wanted.filter((p) => p !== "META_ADS");
+    if (!providers.length) return;
+
+    let cancelled = false;
+    let slowTimer: number | undefined;
+    slowTimer = window.setTimeout(() => {
+      if (!cancelled) setVisitBusy(true);
+    }, 800);
+
+    requestVisitSync(selectedWebsite.id, providers)
+      .then(async (d) => {
+        if (cancelled) return;
+        const synced = d.synced || [];
+        const failed = d.failed || [];
+        if (synced.length || failed.length) {
+          await refresh();
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("webastral:synced"));
+          }
+        }
+        if (cancelled) return;
+        const parts: string[] = [];
+        if (synced.length) {
+          parts.push(
+            `Updated ${synced
+              .map((s) => PROVIDER_LABELS[s.provider] || s.provider)
+              .join(" · ")}`
+          );
+        }
+        if (failed.length) {
+          parts.push(
+            failed
+              .map((f) => {
+                const label = PROVIDER_LABELS[f.provider] || f.provider;
+                if (f.reason === "needs_reauth") {
+                  return `${label}: reconnect Google`;
+                }
+                return `${label}: ${f.error || "sync failed"}`;
+              })
+              .join("; ")
+          );
+        }
+        if (parts.length) {
+          setSyncNote(parts.join(" "));
+          window.setTimeout(() => setSyncNote(""), 8000);
+        }
+      })
+      .catch(() => {
+        /* keep cached snapshots; header Sync remains available */
+      })
+      .finally(() => {
+        if (slowTimer) window.clearTimeout(slowTimer);
+        if (!cancelled) setVisitBusy(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (slowTimer) window.clearTimeout(slowTimer);
+    };
+  }, [user?.id, pathname, selectedWebsite?.id, platform?.meta, refresh]);
 
   useEffect(() => {
     if (!mobileNavOpen) return;
@@ -211,12 +326,6 @@ export default function AdminShell({
       "GOOGLE_ADS",
       ...(platform?.meta ? (["META_ADS"] as const) : []),
     ] as const;
-    const labels: Record<string, string> = {
-      GOOGLE_ANALYTICS: "GA4",
-      GOOGLE_SEARCH_CONSOLE: "GSC",
-      GOOGLE_ADS: "Ads",
-      META_ADS: "Meta",
-    };
     const ok: string[] = [];
     const failed: string[] = [];
     const skipped: string[] = [];
@@ -232,20 +341,20 @@ export default function AdminShell({
           );
           ok.push(
             d.days != null
-              ? `${labels[provider]} (${d.days}d)`
-              : labels[provider]
+              ? `${PROVIDER_LABELS[provider]} (${d.days}d)`
+              : PROVIDER_LABELS[provider]
           );
         } catch (e) {
           const msg = (e as Error).message || "";
           if (/not active/i.test(msg)) {
-            skipped.push(labels[provider]);
+            skipped.push(PROVIDER_LABELS[provider]);
             continue;
           }
           if (/expired|revoked|reauth|reconnect/i.test(msg)) {
-            failed.push(`${labels[provider]}: reconnect Google`);
+            failed.push(`${PROVIDER_LABELS[provider]}: reconnect Google`);
             continue;
           }
-          failed.push(`${labels[provider]}: ${msg}`);
+          failed.push(`${PROVIDER_LABELS[provider]}: ${msg}`);
         }
       }
       await refresh();
@@ -383,15 +492,17 @@ export default function AdminShell({
                   className="secondary-button topbar-sync-btn"
                   disabled={!selectedWebsite || syncBusy}
                   title={
-                    selectedWebsite
-                      ? `Sync GA4, Search Console, Ads, and Meta for ${selectedWebsite.name}`
-                      : "Select a website to sync"
+                    !selectedWebsite
+                      ? "Select a website to sync"
+                      : visitBusy
+                        ? `Refreshing stale sources for ${selectedWebsite.name}`
+                        : `Sync GA4, Search Console, Ads, and Meta for ${selectedWebsite.name}`
                   }
                   onClick={() => {
                     syncSelectedWebsite().catch(() => undefined);
                   }}
                 >
-                  {syncBusy ? "Syncing…" : "Sync"}
+                  {syncBusy ? "Syncing…" : visitBusy ? "Refreshing…" : "Sync"}
                 </button>
                 {syncNote ? (
                   <span className="topbar-sync-note" title={syncNote}>
@@ -485,7 +596,7 @@ export function PageHeader({
   action,
 }: {
   eyebrow?: string;
-  title: string;
+  title: ReactNode;
   description: string;
   action?: ReactNode;
 }) {

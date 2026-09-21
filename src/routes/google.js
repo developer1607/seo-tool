@@ -37,6 +37,10 @@ const {
   syncProvider,
 } = require('../lib/google/sync');
 const {
+  syncStaleProviders,
+  STALE_AFTER_HOURS,
+} = require('../lib/google/staleSync');
+const {
   saveAdminGoogleToken,
   touchAdminGoogleToken,
   getAdminGoogleToken,
@@ -1123,6 +1127,45 @@ router.post('/integrations/google/select', requireAuth, async (req, res) => {
       ok: true,
       connection: publicConnection(getConnection(websiteId, provider)),
       sync: syncResult,
+      platforms: platformsForUser(websiteId, req.user.id),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({ error: safeError(e), code: e.code });
+  }
+});
+
+router.post('/integrations/sync-stale', requireAuth, async (req, res) => {
+  try {
+    const owned = resolveOwnedWebsite(
+      req,
+      req.body.website_id || req.selectedWebsite?.id
+    );
+    if (owned.error) {
+      return res
+        .status(owned.status)
+        .json({ error: owned.error, code: owned.code });
+    }
+    const websiteId = owned.site.id;
+    const hasProvidersKey = Array.isArray(req.body.providers);
+    const providers = hasProvidersKey
+      ? req.body.providers
+          .map((p) => String(p || '').toUpperCase())
+          .filter((p) => GOOGLE_PROVIDERS.includes(p) || p === 'META_ADS')
+      : undefined;
+    if (hasProvidersKey && !providers.length) {
+      return res.status(400).json({ error: 'Unsupported provider' });
+    }
+    const dryRun = Boolean(req.body.dry_run);
+    const result = await syncStaleProviders(websiteId, {
+      providers,
+      dryRun,
+    });
+    res.json({
+      ok: true,
+      staleHours: STALE_AFTER_HOURS,
+      dryRun,
+      ...result,
       platforms: platformsForUser(websiteId, req.user.id),
     });
   } catch (e) {

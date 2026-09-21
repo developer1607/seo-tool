@@ -16,14 +16,27 @@ function metaRedirectUri() {
   );
 }
 
-function buildMetaAuthUrl({ userId, mode = 'agency' }) {
+function buildMetaAuthUrl({
+  userId,
+  mode = 'agency',
+  connectMode = 'replace',
+  identityId = null,
+}) {
   if (!metaConfigured()) {
     throw new Error('Meta OAuth is not configured');
   }
+  const connect =
+    connectMode === 'add'
+      ? 'add'
+      : connectMode === 'reconnect'
+        ? 'reconnect'
+        : 'replace';
   const state = signState({
     websiteId: 0,
     userId: Number(userId),
     mode: mode || 'agency',
+    connectMode: connect,
+    identityId: identityId ? Number(identityId) : null,
     localOnly: false,
     providers: ['META_ADS'],
     exp: Date.now() + 10 * 60 * 1000,
@@ -35,6 +48,9 @@ function buildMetaAuthUrl({ userId, mode = 'agency' }) {
     scope: META_SCOPES.join(','),
     response_type: 'code',
   });
+  if (connect === 'reconnect') {
+    params.set('auth_type', 'rerequest');
+  }
   return `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth?${params}`;
 }
 

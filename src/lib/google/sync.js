@@ -351,6 +351,8 @@ async function syncMetaAds(websiteId, { from, to } = {}) {
   }
 }
 
+const syncInflight = new Map();
+
 async function probeAndActivate(websiteId, provider, accessToken) {
   const conn = getConnection(websiteId, provider);
   if (!conn?.external_account_id) {
@@ -376,11 +378,20 @@ async function probeAndActivate(websiteId, provider, accessToken) {
 }
 
 async function syncProvider(websiteId, provider) {
-  if (provider === 'GOOGLE_ANALYTICS') return syncGa4(websiteId);
-  if (provider === 'GOOGLE_SEARCH_CONSOLE') return syncGsc(websiteId);
-  if (provider === 'GOOGLE_ADS') return syncGoogleAds(websiteId);
-  if (provider === 'META_ADS') return syncMetaAds(websiteId);
-  throw new Error('Sync not implemented for this provider');
+  const key = `${websiteId}:${provider}`;
+  const existing = syncInflight.get(key);
+  if (existing) return existing;
+  const pending = (async () => {
+    if (provider === 'GOOGLE_ANALYTICS') return syncGa4(websiteId);
+    if (provider === 'GOOGLE_SEARCH_CONSOLE') return syncGsc(websiteId);
+    if (provider === 'GOOGLE_ADS') return syncGoogleAds(websiteId);
+    if (provider === 'META_ADS') return syncMetaAds(websiteId);
+    throw new Error('Sync not implemented for this provider');
+  })().finally(() => {
+    syncInflight.delete(key);
+  });
+  syncInflight.set(key, pending);
+  return pending;
 }
 
 module.exports = {

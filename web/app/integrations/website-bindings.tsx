@@ -73,6 +73,9 @@ export default function WebsiteBindings() {
   const [pickGa4, setPickGa4] = useState("");
   const [pickGsc, setPickGsc] = useState("");
   const [pickAds, setPickAds] = useState("");
+  const [pickMeta, setPickMeta] = useState("");
+  const [metaAccounts, setMetaAccounts] = useState<Resource[]>([]);
+  const [metaPickOpen, setMetaPickOpen] = useState(false);
 
   const websiteId = selectedWebsite?.id ?? null;
   const queryWebsiteId = Number(search.get("website_id") || 0) || null;
@@ -90,6 +93,45 @@ export default function WebsiteBindings() {
     setPlatforms(d.platforms);
     // Prefer live integrations payload; session linked only means token row exists
     setAgencyLinked(Boolean(d.agencyGoogle?.linked));
+  }, [websiteId]);
+
+  const loadMetaResources = useCallback(async () => {
+    if (!websiteId) return;
+    setBusy("meta-resources");
+    setError("");
+    try {
+      const d = await api<{
+        accounts: (Resource & {
+          linked?: { website_id: number } | null;
+          currency?: string | null;
+        })[];
+        error?: string;
+        needsReauth?: boolean;
+      }>("/integrations/meta/accounts");
+      const rows = (d.accounts || [])
+        .filter(
+          (a) => !a.linked || a.linked.website_id === websiteId
+        )
+        .map((a) => ({
+          id: a.id,
+          name: a.currency ? `${a.name} · ${a.currency}` : a.name,
+        }));
+      setMetaAccounts(rows);
+      setMetaPickOpen(true);
+      if (rows[0]) setPickMeta(rows[0].id);
+      if (d.error || d.needsReauth) {
+        setError(
+          d.error ||
+            "Meta login needs reconnect. Open Integrations → Manage Meta."
+        );
+      }
+    } catch (e) {
+      setMetaAccounts([]);
+      setMetaPickOpen(true);
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
   }, [websiteId]);
 
   const loadResources = useCallback(async () => {
@@ -144,6 +186,9 @@ export default function WebsiteBindings() {
     setPickGa4("");
     setPickGsc("");
     setPickAds("");
+    setPickMeta("");
+    setMetaAccounts([]);
+    setMetaPickOpen(false);
   }, [websiteId]);
 
   const contextReady =
@@ -192,6 +237,14 @@ export default function WebsiteBindings() {
     [platforms]
   );
 
+  const needsMetaSelect = useMemo(
+    () =>
+      platforms.some(
+        (p) => p.key === "META_ADS" && p.status === "PENDING_SELECT"
+      ),
+    [platforms]
+  );
+
   // Only load Google resource lists after session matches query website
   useEffect(() => {
     if (!contextReady || !websiteId || resources) return;
@@ -205,6 +258,18 @@ export default function WebsiteBindings() {
     resources,
     loadResources,
     googleFlag,
+  ]);
+
+  useEffect(() => {
+    if (!contextReady || !websiteId || metaPickOpen) return;
+    if (!needsMetaSelect) return;
+    loadMetaResources().catch((e) => setError((e as Error).message));
+  }, [
+    contextReady,
+    websiteId,
+    needsMetaSelect,
+    metaPickOpen,
+    loadMetaResources,
   ]);
 
   const adsOnlyPending = useMemo(() => {
@@ -341,6 +406,40 @@ export default function WebsiteBindings() {
     }
   }
 
+  async function selectMeta(id: string, name: string) {
+    if (!selectedWebsite || !id) return;
+    setBusy("META_ADS");
+    setError("");
+    try {
+      const d = await api<{
+        platforms: Platform[];
+        sync: { ok?: boolean; days?: number; error?: string } | null;
+      }>("/integrations/meta/select", {
+        method: "POST",
+        body: JSON.stringify({
+          website_id: selectedWebsite.id,
+          external_account_id: id,
+          external_account_name: name,
+          sync: true,
+        }),
+      });
+      setPlatforms(d.platforms);
+      const syncNote =
+        d.sync?.ok === false
+          ? ` Connected, sync failed: ${d.sync.error}`
+          : d.sync?.days != null
+            ? ` Synced ${d.sync.days} days.`
+            : "";
+      setMessage(`Meta Ads active.${syncNote}`);
+      setMetaPickOpen(false);
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function sync(provider: string) {
     if (!selectedWebsite) return;
     setBusy(`sync:${provider}`);
@@ -390,16 +489,24 @@ export default function WebsiteBindings() {
     if (p.key === "META_ADS") {
       if (actions.includes("connect") || actions.includes("reconnect")) {
         return (
-          <Link className="primary-button" href="/integrations?tab=accounts">
-            Connect Meta
+          <Link
+            className="primary-button"
+            href="/integrations?tab=accounts&view=meta"
+          >
+            {actions.includes("reconnect") ? "Reconnect Meta" : "Connect Meta"}
           </Link>
         );
       }
       if (actions.includes("select")) {
         return (
-          <Link className="primary-button" href="/integrations?tab=accounts">
-            Link Meta account
-          </Link>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={busy === "meta-resources"}
+            onClick={() => loadMetaResources().catch((e) => setError(e.message))}
+          >
+            {busy === "meta-resources" ? "Loading…" : "Choose Meta account"}
+          </button>
         );
       }
     }
@@ -758,6 +865,58 @@ export default function WebsiteBindings() {
                     )}
                   </div>
                 )}
+              </section>
+            )}
+
+            {metaPickOpen && (
+              <section className="panel" style={{ marginTop: 16 }}>
+                <div className="panel-header">
+                  <div>
+                    <h2>Select Meta ad account</h2>
+                    <p className="muted">
+                      Probe runs before Connected, then backfills ~30 days.
+                    </p>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={busy === "meta-resources"}
+                    onClick={() =>
+                      loadMetaResources().catch((e) => setError(e.message))
+                    }
+                  >
+                    {busy === "meta-resources" ? "Loading…" : "Reload accounts"}
+                  </button>
+                </div>
+                <div className="form-grid" style={{ padding: "0 4px 12px" }}>
+                  <label>
+                    Meta Ads account
+                    <select
+                      value={pickMeta}
+                      onChange={(e) => setPickMeta(e.target.value)}
+                    >
+                      {metaAccounts.length === 0 && (
+                        <option value="">No ad accounts found</option>
+                      )}
+                      {metaAccounts.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={!pickMeta || busy === "META_ADS"}
+                    onClick={() => {
+                      const r = metaAccounts.find((x) => x.id === pickMeta);
+                      if (r) selectMeta(r.id, r.name);
+                    }}
+                  >
+                    {busy === "META_ADS" ? "Saving…" : "Save & sync Meta"}
+                  </button>
+                </div>
               </section>
             )}
           </>

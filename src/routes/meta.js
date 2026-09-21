@@ -19,24 +19,24 @@ const {
   getMetaAccessTokenPlain,
   agencyMetaStatus,
   tokenReadable,
-  findMetaAccessToken,
+  listMetaDataIdentities,
+  setDefaultMetaIdentity,
+  disconnectMetaIdentity,
+  markMetaIdentityNeedsReauth,
 } = require('../lib/meta/agency');
 const {
   listMetaAdAccounts,
-  probeMetaAds,
   normalizeActId,
 } = require('../lib/meta/ads');
-const {
-  upsertConnection,
-  getConnection,
-  publicConnection,
-} = require('../lib/connections');
 const { getWebsite } = require('../lib/websites');
-const { getClient, platformStatus } = require('../lib/clients');
+const { platformStatus } = require('../lib/clients');
 const { setSession } = require('../lib/session');
 const { createNotification } = require('../lib/notifications');
 const { getDb } = require('../lib/db');
-const { syncProvider, probeAndActivate } = require('../lib/google/sync');
+const {
+  linkMetaToWebsite,
+  importMetaAsClient,
+} = require('../lib/meta/importAsset');
 
 const router = express.Router();
 
@@ -89,7 +89,19 @@ router.get('/integrations/meta/start', requireAuth, (req, res) => {
       code: 'META_NOT_CONFIGURED',
     });
   }
-  const url = buildMetaAuthUrl({ userId: req.user.id, mode: 'agency' });
+  const connectMode =
+    req.query.connect === 'add'
+      ? 'add'
+      : req.query.connect === 'reconnect'
+        ? 'reconnect'
+        : 'replace';
+  const identityId = Number(req.query.identity_id || 0) || null;
+  const url = buildMetaAuthUrl({
+    userId: req.user.id,
+    mode: 'agency',
+    connectMode,
+    identityId,
+  });
   if (req.query.format === 'json') return res.json({ url });
   return res.redirect(url);
 });
@@ -99,7 +111,7 @@ router.get('/auth/meta/callback', async (req, res) => {
     const params = new URLSearchParams();
     params.set('meta_error', String(msg));
     return res.redirect(
-      `${appBase()}/integrations?tab=services&${params.toString()}`
+      `${appBase()}/integrations?tab=accounts&view=meta&${params.toString()}`
     );
   };
 
@@ -132,13 +144,22 @@ router.get('/auth/meta/callback', async (req, res) => {
           .replace('T', ' ')
       : null;
 
-    saveAdminMetaToken(req.user.id, encrypt(tokenPack.access_token), {
+    const connectMode =
+      state.connectMode === 'add'
+        ? 'add'
+        : state.connectMode === 'reconnect'
+          ? 'reconnect'
+          : 'replace';
+    const saved = saveAdminMetaToken(req.user.id, encrypt(tokenPack.access_token), {
       scopesJson: JSON.stringify(META_SCOPES),
       expiresAt,
       metaUserId: me?.id || null,
       metaName: me?.name || null,
       metaEmail: me?.email || null,
+      mode: connectMode,
+      identityId: state.identityId || null,
     });
+    const identityId = saved?.data_identity_id || null;
 
     createNotification({
       userId: req.user.id,
@@ -146,14 +167,18 @@ router.get('/auth/meta/callback', async (req, res) => {
       layer: 'PLATFORM',
       type: 'meta.agency_authorized',
       severity: 'info',
-      title: 'Meta linked',
+      title: connectMode === 'add' ? 'Meta account added' : 'Meta linked',
       body: me?.name
-        ? `Connected as ${me.name}. Link an ad account to a website.`
-        : 'Meta connected. Link an ad account to a website.',
-      href: '/integrations?tab=services',
+        ? `Connected as ${me.name}. Sync ad accounts, then link to a website.`
+        : 'Meta connected. Sync ad accounts, then link to a website.',
+      href: `/integrations?tab=accounts&view=meta${identityId ? `&identity_id=${identityId}` : ''}`,
     });
 
-    return res.redirect(`${appBase()}/integrations?tab=services&meta=1`);
+    return res.redirect(
+      `${appBase()}/integrations?tab=accounts&view=meta&meta=1${
+        identityId ? `&identity_id=${identityId}` : ''
+      }`
+    );
   } catch (e) {
     console.error(e);
     return fail(safeError(e));
@@ -161,6 +186,35 @@ router.get('/auth/meta/callback', async (req, res) => {
 });
 
 router.post('/integrations/meta/agency/disconnect', requireAuth, async (req, res) => {
+  const identityId = Number(req.body?.identity_id || 0) || null;
+  if (identityId) {
+    const { getIdentity } = require('../lib/identities/data');
+    const row = getIdentity(identityId);
+    let revoked = false;
+    if (
+      row &&
+      row.user_id === req.user.id &&
+      row.provider === 'meta' &&
+      row.encrypted_token &&
+      tokenReadable(row.encrypted_token)
+    ) {
+      try {
+        const token = decrypt(row.encrypted_token);
+        const r = await revokeMetaToken(token);
+        revoked = Boolean(r.ok);
+      } catch {
+        revoked = false;
+      }
+    }
+    disconnectMetaIdentity(req.user.id, identityId);
+    return res.json({
+      ok: true,
+      revoked,
+      identityId,
+      note: 'That Meta identity was cleared. Other accounts and website links stay.',
+    });
+  }
+
   const row = getAdminMetaToken(req.user.id);
   let revoked = false;
   if (row?.encrypted_access_token && tokenReadable(row.encrypted_access_token)) {
@@ -181,12 +235,44 @@ router.post('/integrations/meta/agency/disconnect', requireAuth, async (req, res
 });
 
 router.get('/integrations/meta/accounts', requireAuth, async (req, res) => {
+  const identityId = Number(req.query.identity_id || 0) || null;
+  const status = agencyMetaStatus(req.user.id);
+  const identities = listMetaDataIdentities(req.user.id);
+  const selected =
+    identities.find((i) => i.id === identityId) ||
+    identities.find((i) => i.isDefault) ||
+    identities[0] ||
+    null;
+  const resolvedId = selected?.id || null;
+
+  const empty = (extra = {}) =>
+    res.json({
+      connected: false,
+      accounts: [],
+      available: 0,
+      imported: 0,
+      identities,
+      identityId: resolvedId,
+      ...status,
+      ...extra,
+    });
+
+  if (!selected?.hasToken || selected.status === 'needs_reauth') {
+    return empty({
+      needsReauth: Boolean(selected),
+      error: selected
+        ? 'Meta login needs reconnect. Use Reconnect / Add Meta account.'
+        : 'Meta is not connected.',
+      code: selected ? 'NEEDS_REAUTH' : 'NOT_CONNECTED',
+    });
+  }
+
   try {
-    const accessToken = getMetaAccessTokenPlain(req.user.id);
+    const accessToken = getMetaAccessTokenPlain(req.user.id, resolvedId);
     const accounts = await listMetaAdAccounts(accessToken);
     const linked = getDb()
       .prepare(
-        `SELECT external_account_id, website_id, client_id, status
+        `SELECT external_account_id, website_id, client_id, status, data_identity_id
          FROM connections
          WHERE provider = 'META_ADS' AND external_account_id IS NOT NULL`
       )
@@ -194,26 +280,64 @@ router.get('/integrations/meta/accounts', requireAuth, async (req, res) => {
     const byId = Object.fromEntries(
       linked.map((r) => [normalizeActId(r.external_account_id), r])
     );
+    const mapped = accounts.map((a) => {
+      const row = byId[normalizeActId(a.id)];
+      return {
+        ...a,
+        linked: row
+          ? {
+              website_id: row.website_id,
+              client_id: row.client_id,
+              status: row.status,
+              data_identity_id: row.data_identity_id,
+            }
+          : null,
+      };
+    });
+    const imported = mapped.filter((a) => a.linked).length;
     res.json({
       connected: true,
-      ...agencyMetaStatus(req.user.id),
-      accounts: accounts.map((a) => ({
-        ...a,
-        linked: byId[normalizeActId(a.id)] || null,
-      })),
+      ...status,
+      identityId: resolvedId,
+      identities,
+      accounts: mapped,
+      available: mapped.length - imported,
+      imported,
+      needsReauth: false,
     });
   } catch (e) {
     console.error(e);
     if (e.code === 'NOT_CONNECTED' || e.code === 'NEEDS_REAUTH') {
-      return res.json({
-        connected: false,
-        accounts: [],
+      if (e.code === 'NEEDS_REAUTH' && resolvedId) {
+        markMetaIdentityNeedsReauth(req.user.id, resolvedId);
+      }
+      return empty({
         needsReauth: e.code === 'NEEDS_REAUTH',
         error: safeError(e),
         code: e.code,
       });
     }
     res.status(400).json({ error: safeError(e), code: e.code });
+  }
+});
+
+router.post('/integrations/meta/identities/default', requireAuth, (req, res) => {
+  try {
+    const identityId = Number(req.body?.identity_id || 0);
+    if (!identityId) {
+      return res.status(400).json({ error: 'identity_id required' });
+    }
+    const row = setDefaultMetaIdentity(req.user.id, identityId);
+    res.json({
+      ok: true,
+      identity: row,
+      agency: agencyMetaStatus(req.user.id),
+    });
+  } catch (e) {
+    res.status(e.code === 'NOT_FOUND' ? 404 : 400).json({
+      error: safeError(e),
+      code: e.code,
+    });
   }
 });
 
@@ -234,82 +358,81 @@ router.post('/integrations/meta/select', requireAuth, async (req, res) => {
       req.body.external_account_name || req.body.name || accountId
     ).trim();
     const syncAfter = req.body.sync !== false;
+    const identityId =
+      Number(req.body.identity_id || 0) ||
+      agencyMetaStatus(req.user.id).identityId ||
+      null;
 
-    if (!accountId) {
-      return res.status(400).json({ error: 'Select a Meta ad account' });
-    }
-    if (!findMetaAccessToken(req.user.id)) {
-      return res.status(400).json({
-        error: 'Connect Meta under Integrations first.',
-        code: 'NOT_CONNECTED',
-      });
-    }
-
-    const existing = getDb()
-      .prepare(
-        `SELECT * FROM connections
-         WHERE provider = 'META_ADS' AND external_account_id = ?`
-      )
-      .get(accountId);
-    if (
-      existing &&
-      existing.status === 'ACTIVE' &&
-      existing.website_id !== site.id
-    ) {
-      return res.status(400).json({
-        error: 'Already linked to another website',
-        website_id: existing.website_id,
-        client_id: existing.client_id,
-        code: 'ALREADY_LINKED',
-      });
-    }
-
-    const metaStatus = agencyMetaStatus(req.user.id);
-    upsertConnection({
-      clientId: site.client_id,
+    const result = await linkMetaToWebsite({
+      userId: req.user.id,
       websiteId: site.id,
-      provider: 'META_ADS',
-      status: 'PENDING_SELECT',
-      externalAccountId: accountId,
-      externalAccountName: displayName,
-      connectedByUserId: req.user.id,
-      dataIdentityId: metaStatus.identityId || null,
-      lastError: null,
+      accountId,
+      displayName,
+      identityId,
+      syncAfter,
     });
-
-    const accessToken = getMetaAccessTokenPlain(
-      req.user.id,
-      metaStatus.identityId || null
-    );
-    await probeAndActivate(site.id, 'META_ADS', accessToken);
-
-    let syncResult = null;
-    if (syncAfter) {
-      try {
-        syncResult = await syncProvider(site.id, 'META_ADS');
-      } catch (syncErr) {
-        syncResult = { ok: false, error: safeError(syncErr) };
-      }
-    }
 
     setSession(res, {
       userId: req.user.id,
       role: req.user.role,
-      selectedClientId: site.client_id,
-      selectedWebsiteId: site.id,
+      selectedClientId: result.client.id,
+      selectedWebsiteId: result.website.id,
     });
 
-    res.json({
-      ok: true,
-      client: getClient(site.client_id),
-      website: site,
-      connection: publicConnection(getConnection(site.id, 'META_ADS')),
-      sync: syncResult,
-      platforms: platformsForUser(site.id, req.user.id),
-    });
+    res.json(result);
   } catch (e) {
     console.error(e);
-    res.status(400).json({ error: safeError(e), code: e.code });
+    const status = e.status || 400;
+    res.status(status).json({
+      error: safeError(e),
+      code: e.code,
+      client_id: e.client_id,
+      website_id: e.website_id,
+    });
+  }
+});
+
+router.post('/integrations/meta/import', requireAuth, async (req, res) => {
+  try {
+    const accountId = normalizeActId(req.body.external_account_id);
+    const displayName = String(
+      req.body.external_account_name || req.body.name || accountId
+    ).trim();
+    const websiteUrl = String(req.body.website_url || '').trim();
+    const clientName = String(req.body.client_name || displayName || '').trim();
+    const syncAfter = req.body.sync !== false;
+    const identityId =
+      Number(req.body.identity_id || 0) ||
+      agencyMetaStatus(req.user.id).identityId ||
+      null;
+
+    const result = await importMetaAsClient({
+      userId: req.user.id,
+      accountId,
+      displayName,
+      websiteUrl,
+      clientName,
+      identityId,
+      syncAfter,
+    });
+
+    setSession(res, {
+      userId: req.user.id,
+      role: req.user.role,
+      selectedClientId: result.client.id,
+      selectedWebsiteId: result.website.id,
+    });
+
+    res.status(201).json(result);
+  } catch (e) {
+    console.error(e);
+    const status = e.status || 400;
+    res.status(status).json({
+      error: safeError(e),
+      code: e.code,
+      client_id: e.client_id,
+      website_id: e.website_id,
+    });
   }
 });
 

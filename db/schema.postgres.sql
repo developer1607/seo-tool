@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS auth_identities (
   UNIQUE (provider, provider_sub)
 );
 
+-- origin = first platform family (never overwritten). Catalog: src/lib/integrations/catalog.js
+-- Known: MANUAL | GOOGLE | META | LINKEDIN | TIKTOK | MICROSOFT | OTHER (open TEXT for future).
 CREATE TABLE IF NOT EXISTS clients (
   id BIGSERIAL PRIMARY KEY,
   name TEXT NOT NULL,
@@ -31,6 +33,8 @@ CREATE TABLE IF NOT EXISTS clients (
   timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata',
   currency TEXT NOT NULL DEFAULT 'INR',
   notes TEXT NOT NULL DEFAULT '',
+  origin TEXT NOT NULL DEFAULT 'MANUAL',
+  created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (NOW()::text),
   updated_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
@@ -40,16 +44,18 @@ CREATE TABLE IF NOT EXISTS websites (
   client_id BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   url TEXT NOT NULL,
+  primary_domain TEXT,
   timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata',
   currency TEXT NOT NULL DEFAULT 'INR',
   created_at TEXT NOT NULL DEFAULT (NOW()::text),
   updated_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
 
+-- OAuth identity store per platform family (google, meta, linkedin, … — open TEXT).
 CREATE TABLE IF NOT EXISTS data_identities (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  provider TEXT NOT NULL CHECK (provider IN ('google', 'meta')),
+  provider TEXT NOT NULL,
   provider_sub TEXT NOT NULL DEFAULT '',
   email TEXT,
   display_name TEXT,
@@ -64,17 +70,43 @@ CREATE TABLE IF NOT EXISTS data_identities (
   UNIQUE (user_id, provider, provider_sub)
 );
 
+-- Registry of integration keys (seeded from catalog.js). Add rows for new platforms — no CHECK rewrite.
+CREATE TABLE IF NOT EXISTS integration_providers (
+  provider_key TEXT PRIMARY KEY,
+  family TEXT NOT NULL,
+  label TEXT NOT NULL,
+  phase TEXT NOT NULL DEFAULT 'later',
+  auth_kind TEXT NOT NULL DEFAULT '',
+  source_key TEXT NOT NULL,
+  identity_provider TEXT,
+  metric_source TEXT,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  meta_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (NOW()::text),
+  updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+-- Provenance history: clients.origin = first family, rows here = every channel touch.
+CREATE TABLE IF NOT EXISTS client_sources (
+  id BIGSERIAL PRIMARY KEY,
+  client_id BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  website_id BIGINT REFERENCES websites(id) ON DELETE SET NULL,
+  source TEXT NOT NULL,
+  family TEXT NOT NULL DEFAULT 'OTHER',
+  external_account_id TEXT NOT NULL DEFAULT '',
+  data_identity_id BIGINT REFERENCES data_identities(id) ON DELETE SET NULL,
+  created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  meta_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (NOW()::text),
+  UNIQUE (client_id, source, external_account_id)
+);
+
+-- provider = catalog key (GOOGLE_ANALYTICS, META_ADS, LINKEDIN_ADS, …). Open TEXT.
 CREATE TABLE IF NOT EXISTS connections (
   id BIGSERIAL PRIMARY KEY,
   client_id BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   website_id BIGINT NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-  provider TEXT NOT NULL
-    CHECK (provider IN (
-      'GOOGLE_ANALYTICS',
-      'GOOGLE_SEARCH_CONSOLE',
-      'META_ADS',
-      'GOOGLE_ADS'
-    )),
+  provider TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'NOT_STARTED'
     CHECK (status IN (
       'NOT_STARTED',
@@ -102,17 +134,12 @@ CREATE TABLE IF NOT EXISTS connections (
   UNIQUE (website_id, provider)
 );
 
+-- source aligns with connections.provider / catalog metric_source. Open TEXT.
 CREATE TABLE IF NOT EXISTS metric_snapshots (
   id BIGSERIAL PRIMARY KEY,
   client_id BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
   website_id BIGINT NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
-  source TEXT NOT NULL
-    CHECK (source IN (
-      'GOOGLE_SEARCH_CONSOLE',
-      'GOOGLE_ANALYTICS',
-      'META_ADS',
-      'GOOGLE_ADS'
-    )),
+  source TEXT NOT NULL,
   date TEXT NOT NULL,
   spend DOUBLE PRECISION,
   impressions DOUBLE PRECISION,
@@ -218,7 +245,37 @@ CREATE TABLE IF NOT EXISTS client_invites (
   created_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
 
+-- Future employee / multi-tenant ACL (schema only — no UI yet).
+CREATE TABLE IF NOT EXISTS user_client_access (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  client_id BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'VIEWER',
+  granted_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (NOW()::text),
+  UNIQUE (user_id, client_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_domain_access (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  primary_domain TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'VIEWER',
+  granted_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (NOW()::text),
+  UNIQUE (user_id, primary_domain)
+);
+
 CREATE INDEX IF NOT EXISTS idx_websites_client ON websites(client_id);
+CREATE INDEX IF NOT EXISTS idx_websites_primary_domain ON websites(primary_domain);
+CREATE INDEX IF NOT EXISTS idx_clients_origin ON clients(origin);
+CREATE INDEX IF NOT EXISTS idx_clients_created_by ON clients(created_by_user_id);
+CREATE INDEX IF NOT EXISTS idx_client_sources_client ON client_sources(client_id);
+CREATE INDEX IF NOT EXISTS idx_client_sources_source ON client_sources(source);
+CREATE INDEX IF NOT EXISTS idx_client_sources_family ON client_sources(family);
+CREATE INDEX IF NOT EXISTS idx_integration_providers_family ON integration_providers(family);
+CREATE INDEX IF NOT EXISTS idx_user_client_access_user ON user_client_access(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_domain_access_domain ON user_domain_access(primary_domain);
 CREATE INDEX IF NOT EXISTS idx_connections_client ON connections(client_id);
 CREATE INDEX IF NOT EXISTS idx_connections_website ON connections(website_id);
 CREATE INDEX IF NOT EXISTS idx_connections_status ON connections(status);
