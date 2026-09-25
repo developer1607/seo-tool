@@ -57,6 +57,7 @@ function providerLabel(p: string) {
 }
 
 function statusLabel(s: string) {
+  if (s === "ACCESS_NOT_GIVEN") return "ACCESS NOT GIVEN";
   return s.replace(/_/g, " ");
 }
 

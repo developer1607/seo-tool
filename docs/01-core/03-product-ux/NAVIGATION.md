@@ -50,11 +50,11 @@ Login lands on **`/agency`**. Client + website + Sync appear only on pages that 
 3. `/integrations?tab=website&website_id=` → Use portal Google → pick accounts → Sync  
 4. `/` Overview
 
-### B. Per-website OAuth (client won’t invite)
+### B. Manual client + agency Google access
 
-1. `/clients/[id]` → select website  
-2. `/integrations?tab=website&website_id=` → Connect this site’s Google  
-3. Pick accounts → Sync  
+1. `/clients` → add client / website manually  
+2. Client invites agency Google to GA4 / Search Console / Ads  
+3. `/integrations?tab=website&website_id=` → Use agency Google → pick accounts → Sync  
 
 ### C. Monday book check
 

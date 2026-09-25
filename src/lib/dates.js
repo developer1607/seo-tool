@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 /** Date range helpers for Webastral (FR-006 / FR-009). Dates as YYYY-MM-DD. */
 
@@ -64,6 +64,16 @@ function resolvePreset(preset, customFrom, customTo) {
       label = 'Last 14 days';
       resolved = 'last_14';
       break;
+    case 'last_90':
+      from = addDays(end, -89);
+      label = 'Last 90 days';
+      resolved = 'last_90';
+      break;
+    case 'last_365':
+      from = addDays(end, -364);
+      label = 'Last 365 days';
+      resolved = 'last_365';
+      break;
     case 'last_month': {
       const prev = new Date(end.getFullYear(), end.getMonth() - 1, 1);
       from = startOfMonth(prev);
@@ -126,6 +136,8 @@ const PRESETS = [
   { id: 'last_7', label: 'Last 7 days' },
   { id: 'last_14', label: 'Last 14 days' },
   { id: 'last_30', label: 'Last 30 days' },
+  { id: 'last_90', label: 'Last 90 days' },
+  { id: 'last_365', label: 'Last 365 days' },
   { id: 'last_month', label: 'Last month' },
   { id: 'current_month', label: 'Current month' },
   { id: 'previous_month', label: 'Previous month' },

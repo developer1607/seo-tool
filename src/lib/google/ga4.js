@@ -31,21 +31,53 @@ async function googlePost(url, accessToken, body) {
   return data;
 }
 
-async function listGa4Properties(accessToken) {
-  const data = await googleGet(
-    'https://analyticsadmin.googleapis.com/v1beta/accountSummaries',
-    accessToken
-  );
-  const out = [];
-  for (const account of data.accountSummaries || []) {
-    for (const prop of account.propertySummaries || []) {
-      out.push({
-        id: prop.property,
-        name: prop.displayName || prop.property,
-        account: account.displayName || account.account,
-      });
-    }
+function normalizeAccountId(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (s.startsWith('accounts/')) return s;
+  if (s.startsWith('accountSummaries/')) {
+    return `accounts/${s.slice('accountSummaries/'.length)}`;
   }
+  if (/^\d+$/.test(s)) return `accounts/${s}`;
+  return s;
+}
+
+function normalizePropertyId(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (s.startsWith('properties/')) return s;
+  if (/^\d+$/.test(s)) return `properties/${s}`;
+  return s;
+}
+
+async function listGa4Properties(accessToken) {
+  const out = [];
+  let pageToken = '';
+  do {
+    const params = new URLSearchParams({ pageSize: '200' });
+    if (pageToken) params.set('pageToken', pageToken);
+    const data = await googleGet(
+      `https://analyticsadmin.googleapis.com/v1beta/accountSummaries?${params}`,
+      accessToken
+    );
+    for (const account of data.accountSummaries || []) {
+      const accountId = normalizeAccountId(account.account || account.name);
+      const accountName = account.displayName || accountId;
+      for (const prop of account.propertySummaries || []) {
+        const propertyId = normalizePropertyId(prop.property);
+        out.push({
+          id: propertyId,
+          name: prop.displayName || propertyId,
+          account: accountName,
+          accountId,
+          accountName,
+          propertyId,
+          propertyName: prop.displayName || propertyId,
+        });
+      }
+    }
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
   return out;
 }
 
@@ -63,28 +95,40 @@ function normalizeWebsiteUrl(raw) {
   }
 }
 
+async function getGa4PropertyStreamUrls(accessToken, propertyId) {
+  const parent = normalizePropertyId(propertyId);
+  if (!parent) return [];
+  try {
+    const urls = [];
+    const seen = new Set();
+    let pageToken = '';
+    do {
+      const params = new URLSearchParams({ pageSize: '200' });
+      if (pageToken) params.set('pageToken', pageToken);
+      const data = await googleGet(
+        `https://analyticsadmin.googleapis.com/v1beta/${parent}/dataStreams?${params}`,
+        accessToken
+      );
+      for (const stream of data.dataStreams || []) {
+        if (stream.type && stream.type !== 'WEB_DATA_STREAM') continue;
+        const uri = stream.webStreamData?.defaultUri;
+        const normalized = normalizeWebsiteUrl(uri);
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        urls.push(normalized);
+      }
+      pageToken = data.nextPageToken || '';
+    } while (pageToken);
+    return urls;
+  } catch {
+    return [];
+  }
+}
+
 /** First web data stream defaultUri for a GA4 property, if Google has one. */
 async function getGa4PropertyWebsiteUrl(accessToken, propertyId) {
-  const parent = String(propertyId).startsWith('properties/')
-    ? String(propertyId)
-    : `properties/${propertyId}`;
-  try {
-    const data = await googleGet(
-      `https://analyticsadmin.googleapis.com/v1beta/${parent}/dataStreams`,
-      accessToken
-    );
-    const streams = data.dataStreams || [];
-    const urls = [];
-    for (const stream of streams) {
-      if (stream.type && stream.type !== 'WEB_DATA_STREAM') continue;
-      const uri = stream.webStreamData?.defaultUri;
-      const normalized = normalizeWebsiteUrl(uri);
-      if (normalized) urls.push(normalized);
-    }
-    return urls[0] || null;
-  } catch {
-    return null;
-  }
+  const urls = await getGa4PropertyStreamUrls(accessToken, propertyId);
+  return urls[0] || null;
 }
 
 async function mapPool(items, concurrency, fn) {
@@ -103,9 +147,53 @@ async function mapPool(items, concurrency, fn) {
 
 async function enrichGa4WithUrls(accessToken, properties) {
   return mapPool(properties, 5, async (p) => {
-    const url = await getGa4PropertyWebsiteUrl(accessToken, p.id);
-    return { ...p, url };
+    const streamUrls = await getGa4PropertyStreamUrls(accessToken, p.id);
+    return {
+      ...p,
+      streamUrls,
+      url: streamUrls[0] || p.url || null,
+    };
   });
+}
+
+/**
+ * Account → properties inventory for grouped import.
+ * Optionally enrich stream URLs (slower; used for import-account / resources).
+ */
+async function listGa4AccountGroups(accessToken, { enrichUrls = false } = {}) {
+  const flat = await listGa4Properties(accessToken);
+  const enriched = enrichUrls
+    ? await enrichGa4WithUrls(accessToken, flat)
+    : flat.map((p) => ({ ...p, streamUrls: [], url: p.url || null }));
+
+  const byAccount = new Map();
+  for (const p of enriched) {
+    const accountId = normalizeAccountId(p.accountId || '');
+    if (!accountId) continue;
+    if (!byAccount.has(accountId)) {
+      byAccount.set(accountId, {
+        id: accountId,
+        name: p.accountName || p.account || accountId,
+        accountId,
+        accountName: p.accountName || p.account || accountId,
+        properties: [],
+      });
+    }
+    byAccount.get(accountId).properties.push({
+      id: p.propertyId || p.id,
+      name: p.propertyName || p.name,
+      propertyId: p.propertyId || p.id,
+      propertyName: p.propertyName || p.name,
+      accountId,
+      accountName: p.accountName || p.account,
+      url: p.url || null,
+      streamUrls: p.streamUrls || [],
+    });
+  }
+
+  return [...byAccount.values()].sort((a, b) =>
+    String(a.name).localeCompare(String(b.name))
+  );
 }
 
 async function probeGa4(accessToken, propertyId) {
@@ -189,9 +277,13 @@ async function fetchGa4Daily(accessToken, propertyId, from, to) {
 
 module.exports = {
   listGa4Properties,
+  listGa4AccountGroups,
   getGa4PropertyWebsiteUrl,
+  getGa4PropertyStreamUrls,
   enrichGa4WithUrls,
   normalizeWebsiteUrl,
+  normalizeAccountId,
+  normalizePropertyId,
   probeGa4,
   fetchGa4Daily,
 };

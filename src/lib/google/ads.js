@@ -195,18 +195,28 @@ async function listClientAccounts(accessToken, managerId) {
     .filter(Boolean);
 }
 
+async function mapPool(items, concurrency, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx], idx);
+    }
+  }
+  const n = Math.min(concurrency, Math.max(1, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return out;
+}
+
 /**
  * Flat list of selectable Ads accounts (direct + MCC clients).
  * Managers themselves are omitted unless they also have campaigns (rare).
  */
 async function listAdsAccounts(accessToken) {
   const accessible = await listAccessibleCustomerIds(accessToken);
-  const out = [];
   const seen = new Set();
-  // Cap to keep discover / Integrations responsive under large MCCs
-  const ids = accessible.slice(0, 40);
-
-  for (const cid of ids) {
+  const groups = await mapPool(accessible, 5, async (cid) => {
     let info = null;
     try {
       info = await fetchCustomerInfo(accessToken, cid, cid);
@@ -214,28 +224,21 @@ async function listAdsAccounts(accessToken) {
       try {
         info = await fetchCustomerInfo(accessToken, cid, null);
       } catch {
-        continue;
+        return [];
       }
     }
-    if (!info) continue;
+    if (!info) return [];
 
     if (info.manager) {
       try {
-        const clients = await listClientAccounts(accessToken, cid);
-        for (const c of clients) {
-          if (seen.has(c.id)) continue;
-          seen.add(c.id);
-          out.push(c);
-        }
+        return await listClientAccounts(accessToken, cid);
       } catch {
         /* manager may lack hierarchy permission */
       }
-      continue;
+      return [];
     }
 
-    if (seen.has(info.id)) continue;
-    seen.add(info.id);
-    out.push({
+    return [{
       id: info.id,
       name: info.name,
       currency: info.currency,
@@ -243,7 +246,15 @@ async function listAdsAccounts(accessToken) {
       manager: false,
       loginCustomerId: info.id,
       account: info.testAccount ? 'Test account' : 'Direct',
-    });
+    }];
+  });
+
+  const out = [];
+  for (const item of groups.flat()) {
+    const id = normalizeCustomerId(item.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ ...item, id });
   }
 
   out.sort((a, b) => String(a.name).localeCompare(String(b.name)));

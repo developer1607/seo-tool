@@ -8,7 +8,7 @@ const {
   getConnection,
   publicConnection,
 } = require('../connections');
-const { probeAndActivate, syncProvider } = require('../google/sync');
+const { probeAndActivate, syncProvider, syncMetaAds } = require('../google/sync');
 const {
   getMetaAccessTokenPlain,
   agencyMetaStatus,
@@ -114,7 +114,7 @@ async function linkMetaToWebsite({
   let syncResult = null;
   if (syncAfter) {
     try {
-      syncResult = await syncProvider(site.id, 'META_ADS');
+      syncResult = await syncMetaAds(site.id, { preset: 'last_365' });
     } catch (syncErr) {
       syncResult = {
         ok: false,

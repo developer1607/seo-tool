@@ -4,6 +4,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { getDb } = require('../lib/db');
 const { setSession, clearSession } = require('../lib/session');
+const { take, clientKey } = require('../lib/rateLimit');
 
 const router = express.Router();
 
@@ -13,6 +14,17 @@ router.get('/login', (req, res) => {
 });
 
 router.post('/login', (req, res) => {
+  const limited = take(clientKey(req, 'login'), {
+    limit: 8,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (!limited.ok) {
+    return res.status(429).render('login', {
+      title: 'Sign in',
+      layout: false,
+      error: 'Too many sign-in attempts. Wait a few minutes and try again.',
+    });
+  }
   const email = String(req.body.email || '')
     .trim()
     .toLowerCase();

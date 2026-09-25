@@ -4,6 +4,8 @@ const { getDb } = require('../db');
 const { decrypt } = require('../crypto');
 const {
   getConnection,
+  listConnections,
+  GOOGLE_PROVIDERS,
   markSynced,
   setConnectionError,
   findGoogleTokenConnection,
@@ -206,11 +208,19 @@ async function syncGsc(websiteId, { from, to } = {}) {
     'GOOGLE_SEARCH_CONSOLE'
   );
   try {
+    let trackedQueries = [];
+    try {
+      const { listCustomQueries } = require('./trackedKeywords');
+      trackedQueries = listCustomQueries(websiteId);
+    } catch {
+      trackedQueries = [];
+    }
     const rows = await fetchGscDaily(
       accessToken,
       conn.external_account_id,
       range.from,
-      range.to
+      range.to,
+      { trackedQueries }
     );
     for (const r of rows) {
       upsertSnapshot({
@@ -232,7 +242,10 @@ async function syncGsc(websiteId, { from, to } = {}) {
         primary_value: null,
         efficiency: null,
         efficiency_kind: 'NONE',
-        payload_json: '{}',
+        payload_json: JSON.stringify({
+          top_queries: r.top_queries || [],
+          data_state: 'final',
+        }),
       });
     }
     markSynced(websiteId, 'GOOGLE_SEARCH_CONSOLE');
@@ -298,12 +311,14 @@ async function syncGoogleAds(websiteId, { from, to } = {}) {
   }
 }
 
-async function syncMetaAds(websiteId, { from, to } = {}) {
+async function syncMetaAds(websiteId, { from, to, preset } = {}) {
   const conn = getConnection(websiteId, 'META_ADS');
   if (!conn || conn.status !== 'ACTIVE' || !conn.external_account_id) {
     throw new Error('Meta Ads connection is not active');
   }
-  const range = from && to ? { from, to } : resolvePreset('last_30');
+  // Meta often has sparse recent days — default backfill 90d (import uses 365).
+  const range =
+    from && to ? { from, to } : resolvePreset(preset || 'last_90');
   const userId = conn.connected_by_user_id;
   if (!userId) {
     throw new Error('Meta connection has no owner — reconnect Meta');
@@ -330,7 +345,7 @@ async function syncMetaAds(websiteId, { from, to } = {}) {
         clicks: r.clicks,
         ctr: r.ctr,
         avg_position: null,
-        reach: null,
+        reach: r.reach,
         sessions: null,
         users: null,
         engaged_sessions: null,
@@ -339,7 +354,11 @@ async function syncMetaAds(websiteId, { from, to } = {}) {
         primary_value: null,
         efficiency: null,
         efficiency_kind: 'NONE',
-        payload_json: '{}',
+        payload_json: JSON.stringify({
+          ...(r.payload || {}),
+          cpc: r.cpc,
+          cpm: r.cpm,
+        }),
       });
     }
     markSynced(websiteId, 'META_ADS');
@@ -377,21 +396,56 @@ async function probeAndActivate(websiteId, provider, accessToken) {
   return markVerified(websiteId, provider);
 }
 
-async function syncProvider(websiteId, provider) {
+async function syncProvider(websiteId, provider, opts = {}) {
   const key = `${websiteId}:${provider}`;
   const existing = syncInflight.get(key);
   if (existing) return existing;
   const pending = (async () => {
-    if (provider === 'GOOGLE_ANALYTICS') return syncGa4(websiteId);
-    if (provider === 'GOOGLE_SEARCH_CONSOLE') return syncGsc(websiteId);
-    if (provider === 'GOOGLE_ADS') return syncGoogleAds(websiteId);
-    if (provider === 'META_ADS') return syncMetaAds(websiteId);
+    if (provider === 'GOOGLE_ANALYTICS') return syncGa4(websiteId, opts);
+    if (provider === 'GOOGLE_SEARCH_CONSOLE') return syncGsc(websiteId, opts);
+    if (provider === 'GOOGLE_ADS') return syncGoogleAds(websiteId, opts);
+    if (provider === 'META_ADS') return syncMetaAds(websiteId, opts);
     throw new Error('Sync not implemented for this provider');
   })().finally(() => {
     syncInflight.delete(key);
   });
   syncInflight.set(key, pending);
   return pending;
+}
+
+async function syncAvailableGoogleProviders(websiteId, opts = {}) {
+  const connections = listConnections(websiteId).filter(
+    (conn) =>
+      GOOGLE_PROVIDERS.includes(conn.provider) &&
+      conn.status === 'ACTIVE' &&
+      conn.external_account_id
+  );
+  const synced = [];
+  const failed = [];
+
+  for (const conn of connections) {
+    try {
+      const result = await syncProvider(websiteId, conn.provider, opts);
+      synced.push({
+        provider: conn.provider,
+        days: result.days,
+        from: result.from,
+        to: result.to,
+      });
+    } catch (e) {
+      failed.push({
+        provider: conn.provider,
+        error: e.message || 'Sync failed',
+        code: e.code || null,
+      });
+    }
+  }
+
+  return {
+    ok: failed.length === 0,
+    synced,
+    failed,
+  };
 }
 
 module.exports = {
@@ -401,5 +455,6 @@ module.exports = {
   syncGoogleAds,
   syncMetaAds,
   syncProvider,
+  syncAvailableGoogleProviders,
   probeAndActivate,
 };

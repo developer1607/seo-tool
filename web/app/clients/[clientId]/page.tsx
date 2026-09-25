@@ -37,6 +37,24 @@ type Research = {
   websites: ResearchWebsite[];
 };
 
+type Resource = {
+  id: string;
+  name: string;
+  account?: string;
+  loginCustomerId?: string;
+  currency?: string | null;
+  current?: boolean;
+  recommended?: boolean;
+};
+
+type GoogleResources = {
+  ga4: Resource[];
+  gsc: Resource[];
+  ads: Resource[];
+  adsConfigured?: boolean;
+  adsError?: string | null;
+};
+
 type ClientOverview = {
   grain: string;
   range_label: string;
@@ -62,12 +80,32 @@ function statusClass(status: string) {
 }
 
 function statusLabel(status: string) {
+  if (status === "ACCESS_NOT_GIVEN") return "ACCESS NOT GIVEN";
   return status.replace(/_/g, " ");
 }
 
 function fmt(n: number) {
   if (!Number.isFinite(n)) return "—";
   return Math.round(n).toLocaleString();
+}
+
+function defaultResourcePick(rows: Resource[]) {
+  return (
+    rows.find((row) => row.current)?.id ||
+    rows.find((row) => row.recommended)?.id ||
+    ""
+  );
+}
+
+function resourceLabel(row: Resource) {
+  const suffix = row.current
+    ? " · current"
+    : row.recommended
+      ? " · recommended"
+      : "";
+  const account = row.account ? ` · ${row.account}` : "";
+  const currency = row.currency ? ` · ${row.currency}` : "";
+  return `${row.name}${account}${currency} (${row.id})${suffix}`;
 }
 
 export default function ClientDetailsPage() {
@@ -81,8 +119,20 @@ export default function ClientDetailsPage() {
   const [research, setResearch] = useState<Research | null>(null);
   const [overview, setOverview] = useState<ClientOverview | null>(null);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [disconnectGoogle, setDisconnectGoogle] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState("");
+  const [googleResourceSiteId, setGoogleResourceSiteId] = useState<number | null>(
+    null
+  );
+  const [googleResources, setGoogleResources] =
+    useState<GoogleResources | null>(null);
+  const [googlePick, setGooglePick] = useState({
+    ga4: "",
+    gsc: "",
+    ads: "",
+  });
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [loadingResearch, setLoadingResearch] = useState(true);
   // Session matched this URL client (ref resets sync on id change — prevents 5↔9 loops)
@@ -167,6 +217,80 @@ export default function ClientDetailsPage() {
     }
   }
 
+  async function loadGoogleResources(siteId: number) {
+    setGoogleBusy(`load:${siteId}`);
+    setError("");
+    setMessage("");
+    try {
+      const data = await api<GoogleResources>(
+        `/integrations/google/resources?website_id=${siteId}`
+      );
+      const next = {
+        ga4: data.ga4 || [],
+        gsc: data.gsc || [],
+        ads: data.ads || [],
+        adsConfigured: data.adsConfigured,
+        adsError: data.adsError,
+      };
+      setGoogleResourceSiteId(siteId);
+      setGoogleResources(next);
+      setGooglePick({
+        ga4: defaultResourcePick(next.ga4),
+        gsc: defaultResourcePick(next.gsc),
+        ads: defaultResourcePick(next.ads),
+      });
+      if (next.adsError) setError(next.adsError);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setGoogleBusy("");
+    }
+  }
+
+  async function selectGoogleResource(
+    siteId: number,
+    provider: "GOOGLE_ANALYTICS" | "GOOGLE_SEARCH_CONSOLE" | "GOOGLE_ADS",
+    row: Resource
+  ) {
+    setGoogleBusy(`${provider}:${siteId}`);
+    setError("");
+    setMessage("");
+    try {
+      const result = await api<{
+        sync?: {
+          synced?: { provider: string; days?: number }[];
+          failed?: { provider: string; error?: string }[];
+          ok?: boolean;
+        } | null;
+      }>("/integrations/google/select", {
+        method: "POST",
+        body: JSON.stringify({
+          website_id: siteId,
+          provider,
+          external_account_id: row.id,
+          external_account_name: row.name,
+          login_customer_id: row.loginCustomerId || undefined,
+          sync: true,
+        }),
+      });
+      const synced = result.sync?.synced?.length || 0;
+      const failed = result.sync?.failed?.length || 0;
+      setMessage(
+        failed
+          ? `Linked ${row.name} (${row.id}), but ${failed} sync step failed.`
+          : synced
+            ? `Linked and synced ${row.name} (${row.id}).`
+            : `Linked ${row.name} (${row.id}).`
+      );
+      await loadResearch();
+      await loadGoogleResources(siteId);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setGoogleBusy("");
+    }
+  }
+
   async function deleteClient() {
     if (!client) return;
     setBusy(true);
@@ -237,6 +361,11 @@ export default function ClientDetailsPage() {
             </>
           }
         />
+        {message && (
+          <section className="panel" style={{ marginBottom: 16 }}>
+            <p style={{ margin: 0 }}>{message}</p>
+          </section>
+        )}
         {error && <div className="banner-error">{error}</div>}
 
         {(verifyingGoogle || accessRevoked) && client ? (
@@ -343,7 +472,7 @@ export default function ClientDetailsPage() {
                     ? agency.hasAdsScope
                       ? "GA4 · Search Console · Ads scopes"
                       : "Linked — Ads scope may be missing (Reconnect on Google accounts)"
-                    : "Optional — or connect each website with the client's Google"}
+                    : "Required for Google reporting data"}
                 </small>
               </span>
               <b
@@ -360,8 +489,8 @@ export default function ClientDetailsPage() {
             <div>
               <h2>How to get access (manual clients)</h2>
               <p className="muted">
-                Prefer invite when possible; use per-website OAuth when they
-                won&apos;t share access
+                Ask clients to invite your agency account, then select the
+                matching Google resources from this client page.
               </p>
             </div>
           </div>
@@ -373,46 +502,16 @@ export default function ClientDetailsPage() {
                 <small>
                   Ask the client to add your agency Gmail as Viewer on GA4, Full
                   user on Search Console, and read access on Google Ads — then
-                  Integrations → Use portal Google
+                  use Review Google access below.
                 </small>
               </span>
-              <Link
-                className="secondary-button"
-                href={
-                  primaryWebsiteId
-                    ? `/integrations?website_id=${primaryWebsiteId}`
-                    : "/integrations"
-                }
-              >
-                Integrations
-              </Link>
-            </div>
-            <div>
-              <span className="site-favicon">2</span>
-              <span>
-                <strong>Per-website Google OAuth</strong>
-                <small>
-                  On a call / screen share, Integrations → Connect this
-                  site&apos;s Google. Uses their Google login for this website
-                  only — does not replace agency portal login
-                </small>
-              </span>
-              <Link
-                className="secondary-button"
-                href={
-                  primaryWebsiteId
-                    ? `/integrations?website_id=${primaryWebsiteId}`
-                    : "/integrations"
-                }
-              >
-                Connect site Google
-              </Link>
+              <span className="status active">Agency access</span>
             </div>
           </div>
           <p className="muted" style={{ marginTop: 12, padding: "0 4px" }}>
             Never ask clients for Client ID / Client Secret or refresh tokens.
-            Those stay in your .env. They either invite your email or click Allow
-            once on their Google account.
+            Those stay in your .env. Clients should invite your agency email to
+            the relevant Google properties/accounts.
           </p>
         </section>
 
@@ -490,12 +589,16 @@ export default function ClientDetailsPage() {
                       Select
                     </button>
                   )}
-                  <Link
+                  <button
+                    type="button"
                     className="secondary-button"
-                    href={`/integrations?website_id=${site.id}`}
+                    disabled={googleBusy === `load:${site.id}`}
+                    onClick={() => loadGoogleResources(site.id)}
                   >
-                    Choose accounts
-                  </Link>
+                    {googleBusy === `load:${site.id}`
+                      ? "Loading access…"
+                      : "Review Google access"}
+                  </button>
                 </span>
               </div>
               <div className="website-list">
@@ -522,6 +625,137 @@ export default function ClientDetailsPage() {
                     </div>
                   ))}
               </div>
+              {googleResourceSiteId === site.id && googleResources && (
+                <div className="form-grid" style={{ padding: "12px 4px 4px" }}>
+                  <label>
+                    GA4 property
+                    <select
+                      value={googlePick.ga4}
+                      onChange={(e) =>
+                        setGooglePick((prev) => ({
+                          ...prev,
+                          ga4: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Access not given / choose property</option>
+                      {googleResources.ga4.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {resourceLabel(row)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={
+                      !googlePick.ga4 ||
+                      googleBusy === `GOOGLE_ANALYTICS:${site.id}`
+                    }
+                    onClick={() => {
+                      const row = googleResources.ga4.find(
+                        (item) => item.id === googlePick.ga4
+                      );
+                      if (row) {
+                        selectGoogleResource(
+                          site.id,
+                          "GOOGLE_ANALYTICS",
+                          row
+                        );
+                      }
+                    }}
+                  >
+                    {googleBusy === `GOOGLE_ANALYTICS:${site.id}`
+                      ? "Syncing…"
+                      : "Link & sync GA4"}
+                  </button>
+
+                  <label>
+                    Search Console site
+                    <select
+                      value={googlePick.gsc}
+                      onChange={(e) =>
+                        setGooglePick((prev) => ({
+                          ...prev,
+                          gsc: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Access not given / choose site</option>
+                      {googleResources.gsc.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {resourceLabel(row)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={
+                      !googlePick.gsc ||
+                      googleBusy === `GOOGLE_SEARCH_CONSOLE:${site.id}`
+                    }
+                    onClick={() => {
+                      const row = googleResources.gsc.find(
+                        (item) => item.id === googlePick.gsc
+                      );
+                      if (row) {
+                        selectGoogleResource(
+                          site.id,
+                          "GOOGLE_SEARCH_CONSOLE",
+                          row
+                        );
+                      }
+                    }}
+                  >
+                    {googleBusy === `GOOGLE_SEARCH_CONSOLE:${site.id}`
+                      ? "Syncing…"
+                      : "Link & sync GSC"}
+                  </button>
+
+                  <label>
+                    Google Ads account
+                    <select
+                      value={googlePick.ads}
+                      onChange={(e) =>
+                        setGooglePick((prev) => ({
+                          ...prev,
+                          ads: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Access not given / choose Ads account</option>
+                      {googleResources.ads.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {resourceLabel(row)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={
+                      !googlePick.ads ||
+                      googleBusy === `GOOGLE_ADS:${site.id}`
+                    }
+                    onClick={() => {
+                      const row = googleResources.ads.find(
+                        (item) => item.id === googlePick.ads
+                      );
+                      if (row) {
+                        selectGoogleResource(site.id, "GOOGLE_ADS", row);
+                      }
+                    }}
+                  >
+                    {googleBusy === `GOOGLE_ADS:${site.id}`
+                      ? "Syncing…"
+                      : "Link & sync Ads"}
+                  </button>
+                </div>
+              )}
             </div>
           ))}
 

@@ -136,7 +136,7 @@ export default function IntegrationsInner() {
     [router]
   );
 
-  async function connectGoogleData(opts?: { mode?: "replace" | "add" }) {
+  async function connectGoogleData(opts?: { mode?: "replace" }) {
     const mode = opts?.mode || "replace";
     setBusy(true);
     setError("");
@@ -342,18 +342,6 @@ export default function IntegrationsInner() {
                           alignItems: "center",
                         }}
                       >
-                        <button
-                          type="button"
-                          className="text-button"
-                          disabled={busy}
-                          onClick={() => {
-                            connectGoogleData({ mode: "add" }).catch(
-                              () => undefined
-                            );
-                          }}
-                        >
-                          Add account
-                        </button>
                         <button
                           type="button"
                           className="text-button"

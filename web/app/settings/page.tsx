@@ -1,7 +1,7 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
-import { Suspense, useEffect, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import AdminShell, { PageHeader } from "../components/admin-shell";
 import { api, type Session } from "../../lib/api";
@@ -13,6 +13,10 @@ function SettingsInner() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pwdBusy, setPwdBusy] = useState(false);
   const googleLogin = platform?.googleLogin;
   const googleConfigured = Boolean(platform?.google);
 
@@ -69,6 +73,38 @@ function SettingsInner() {
     }
   }
 
+  async function changePassword(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setMessage("");
+    if (newPassword.length < 10) {
+      setError("New password must be at least 10 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("New password and confirmation do not match.");
+      return;
+    }
+    setPwdBusy(true);
+    try {
+      await api("/account/password", {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setMessage("Password updated.");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setPwdBusy(false);
+    }
+  }
+
   return (
     <AdminShell title="Settings">
       <div className="page-content">
@@ -109,6 +145,69 @@ function SettingsInner() {
                 <b className="status active">ADMIN</b>
               </div>
             </div>
+            <form
+              onSubmit={changePassword}
+              style={{
+                marginTop: 16,
+                display: "grid",
+                gap: 10,
+                padding: "0 4px",
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: 15 }}>Change password</h3>
+              <p className="muted" style={{ margin: 0 }}>
+                Logged-in change only — email reset is not wired yet.
+              </p>
+              <label>
+                <span className="muted" style={{ display: "block", marginBottom: 4 }}>
+                  Current password
+                </span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(ev) => setCurrentPassword(ev.target.value)}
+                  required
+                  style={{ width: "100%" }}
+                />
+              </label>
+              <label>
+                <span className="muted" style={{ display: "block", marginBottom: 4 }}>
+                  New password (min 10)
+                </span>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(ev) => setNewPassword(ev.target.value)}
+                  minLength={10}
+                  required
+                  style={{ width: "100%" }}
+                />
+              </label>
+              <label>
+                <span className="muted" style={{ display: "block", marginBottom: 4 }}>
+                  Confirm new password
+                </span>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(ev) => setConfirmPassword(ev.target.value)}
+                  minLength={10}
+                  required
+                  style={{ width: "100%" }}
+                />
+              </label>
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={pwdBusy}
+                style={{ justifySelf: "start" }}
+              >
+                {pwdBusy ? "Saving…" : "Update password"}
+              </button>
+            </form>
           </section>
 
           <section className="panel">

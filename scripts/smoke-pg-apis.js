@@ -257,6 +257,20 @@ async function main() {
     else ok(path, r.status);
   }
 
+  const pwdBad = await req('POST', '/api/account/password', {
+    cookie,
+    body: { current_password: '__wrong__', new_password: 'abcdefghij' },
+  });
+  if (pwdBad.status === 401) ok('/api/account/password (reject bad current)', 401);
+  else fail('/api/account/password (reject bad current)', pwdBad.json || pwdBad.status);
+
+  const pwdShort = await req('POST', '/api/account/password', {
+    cookie,
+    body: { current_password: 'x', new_password: 'short' },
+  });
+  if (pwdShort.status === 400) ok('/api/account/password (reject short)', 400);
+  else fail('/api/account/password (reject short)', pwdShort.json || pwdShort.status);
+
   closeDb();
   printSummary(results);
   if (results.some((r) => !r.ok)) process.exitCode = 1;

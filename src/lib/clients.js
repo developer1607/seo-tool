@@ -12,7 +12,22 @@ function getClient(id) {
   return getDb().prepare(`SELECT * FROM clients WHERE id = ?`).get(id);
 }
 
+function healSyncedPendingConnections(websiteId) {
+  getDb()
+    .prepare(
+      `UPDATE connections
+       SET status = 'ACTIVE', updated_at = datetime('now')
+       WHERE website_id = ?
+         AND status = 'PENDING_SELECT'
+         AND external_account_id IS NOT NULL
+         AND last_sync_at IS NOT NULL
+         AND (last_error IS NULL OR last_error = '')`
+    )
+    .run(websiteId);
+}
+
 function connectionMap(websiteId) {
+  healSyncedPendingConnections(websiteId);
   const rows = getDb()
     .prepare(`SELECT * FROM connections WHERE website_id = ?`)
     .all(websiteId);
@@ -161,7 +176,13 @@ function platformStatus(websiteId, opts = {}) {
       agencyLinked &&
       ['NOT_STARTED', 'DISCONNECTED', 'PENDING_AUTH'].includes(status)
     ) {
-      status = 'PENDING_SELECT';
+      status = c?.external_account_id ? 'PENDING_SELECT' : 'ACCESS_NOT_GIVEN';
+    } else if (
+      agencyLinked &&
+      status === 'PENDING_SELECT' &&
+      !c?.external_account_id
+    ) {
+      status = 'ACCESS_NOT_GIVEN';
     }
     const actions = [];
     const ready = k.key === 'GOOGLE_ADS' ? adsReady : googleReady;
@@ -174,6 +195,8 @@ function platformStatus(websiteId, opts = {}) {
     ) {
       actions.push(agencyLinked ? 'select' : 'connect');
     } else if (status === 'PENDING_SELECT') {
+      actions.push('select');
+    } else if (status === 'ACCESS_NOT_GIVEN') {
       actions.push('select');
     } else if (status === 'ACTIVE') {
       actions.push('sync', 'disconnect');

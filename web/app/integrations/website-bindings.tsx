@@ -12,6 +12,10 @@ type Resource = {
   account?: string;
   loginCustomerId?: string;
   currency?: string | null;
+  current?: boolean;
+  recommended?: boolean;
+  matchReason?: string | null;
+  url?: string | null;
 };
 
 type Platform = {
@@ -30,11 +34,17 @@ type Platform = {
 function statusClass(status: string) {
   if (status === "ACTIVE") return "active";
   if (status === "ERROR" || status === "NEEDS_REAUTH") return "attention";
-  if (status === "PENDING_SELECT" || status === "PENDING_AUTH") return "attention";
+  if (
+    status === "PENDING_SELECT" ||
+    status === "PENDING_AUTH" ||
+    status === "ACCESS_NOT_GIVEN"
+  )
+    return "attention";
   return "";
 }
 
 function statusLabel(status: string) {
+  if (status === "ACCESS_NOT_GIVEN") return "ACCESS NOT GIVEN";
   return status.replace(/_/g, " ");
 }
 
@@ -46,10 +56,27 @@ function rowDetail(p: Platform) {
       : p.account_name;
   }
   if (p.hint) return p.hint;
+  if (p.status === "ACCESS_NOT_GIVEN") {
+    return "No matching access found on agency Google. Invite agency email or review accounts.";
+  }
   if (p.status === "PENDING_SELECT") return "Choose an account to finish setup";
   if (p.status === "NOT_STARTED") return "Not connected yet";
   if (p.last_sync_at) return `Last synced ${p.last_sync_at}`;
   return "—";
+}
+
+function defaultResourcePick(rows: Resource[]) {
+  return (
+    rows.find((row) => row.current)?.id ||
+    rows.find((row) => row.recommended)?.id ||
+    ""
+  );
+}
+
+function resourceSuffix(row: Resource) {
+  if (row.current) return " · current";
+  if (row.recommended) return " · recommended";
+  return "";
 }
 
 export default function WebsiteBindings() {
@@ -81,7 +108,6 @@ export default function WebsiteBindings() {
   const queryWebsiteId = Number(search.get("website_id") || 0) || null;
   const googleFlag = search.get("google");
   const googleError = search.get("google_error");
-  const localFlag = search.get("local");
   const adsFlag = search.get("ads");
 
   const load = useCallback(async () => {
@@ -153,9 +179,9 @@ export default function WebsiteBindings() {
         adsConfigured: d.adsConfigured,
         adsError: d.adsError,
       });
-      if (d.ga4?.[0]) setPickGa4(d.ga4[0].id);
-      if (d.gsc?.[0]) setPickGsc(d.gsc[0].id);
-      if (d.ads?.[0]) setPickAds(d.ads[0].id);
+      setPickGa4(defaultResourcePick(d.ga4 || []));
+      setPickGsc(defaultResourcePick(d.gsc || []));
+      setPickAds(defaultResourcePick(d.ads || []));
       if (d.adsError) setError(d.adsError);
     } catch (e) {
       setResources({
@@ -208,9 +234,7 @@ export default function WebsiteBindings() {
     if (googleError) setError(googleError);
     if (googleFlag === "1") {
       setMessage(
-        localFlag === "1"
-          ? "This website’s Google authorized — pick accounts below (agency login unchanged)."
-          : adsFlag === "1"
+        adsFlag === "1"
             ? "Google Ads authorized — pick an Ads account below."
             : "Google authorized — pick GA4 property and Search Console site below."
       );
@@ -219,11 +243,10 @@ export default function WebsiteBindings() {
       const url = new URL(window.location.href);
       url.searchParams.delete("google");
       url.searchParams.delete("google_error");
-      url.searchParams.delete("local");
       url.searchParams.delete("ads");
       window.history.replaceState({}, "", url.pathname + url.search);
     }
-  }, [googleFlag, googleError, localFlag, adsFlag]);
+  }, [googleFlag, googleError, adsFlag]);
 
   const needsSelect = useMemo(
     () =>
@@ -232,7 +255,8 @@ export default function WebsiteBindings() {
           (p.key === "GOOGLE_ANALYTICS" ||
             p.key === "GOOGLE_SEARCH_CONSOLE" ||
             p.key === "GOOGLE_ADS") &&
-          p.status === "PENDING_SELECT"
+          (p.status === "PENDING_SELECT" ||
+            p.status === "ACCESS_NOT_GIVEN")
       ),
     [platforms]
   );
@@ -277,7 +301,8 @@ export default function WebsiteBindings() {
     const ga4 = platforms.find((p) => p.key === "GOOGLE_ANALYTICS");
     const gsc = platforms.find((p) => p.key === "GOOGLE_SEARCH_CONSOLE");
     return (
-      ads?.status === "PENDING_SELECT" &&
+      (ads?.status === "PENDING_SELECT" ||
+        ads?.status === "ACCESS_NOT_GIVEN") &&
       ga4?.status === "ACTIVE" &&
       gsc?.status === "ACTIVE"
     );
@@ -307,22 +332,6 @@ export default function WebsiteBindings() {
     }
   }
 
-  /** Client's own Google for this website only — does not replace agency login. */
-  async function connectWebsiteGoogle() {
-    if (!selectedWebsite) return;
-    setBusy("connect-local");
-    setError("");
-    try {
-      const d = await api<{ url: string }>(
-        `/integrations/google/start?website_id=${selectedWebsite.id}&force=1&local=1&format=json`
-      );
-      window.location.href = d.url;
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(null);
-    }
-  }
-
   async function connectGoogleAds() {
     if (!selectedWebsite) return;
     setBusy("connect-ads");
@@ -345,21 +354,6 @@ export default function WebsiteBindings() {
     }
   }
 
-  async function connectWebsiteGoogleAds() {
-    if (!selectedWebsite) return;
-    setBusy("connect-ads-local");
-    setError("");
-    try {
-      const d = await api<{ url: string }>(
-        `/integrations/google/start?website_id=${selectedWebsite.id}&providers=GOOGLE_ADS&force=1&local=1&format=json`
-      );
-      window.location.href = d.url;
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(null);
-    }
-  }
-
   async function selectProvider(
     provider: "GOOGLE_ANALYTICS" | "GOOGLE_SEARCH_CONSOLE" | "GOOGLE_ADS",
     id: string,
@@ -372,7 +366,15 @@ export default function WebsiteBindings() {
     try {
       const d = await api<{
         platforms: Platform[];
-        sync: { ok?: boolean; days?: number; error?: string } | null;
+        sync:
+          | {
+              ok?: boolean;
+              days?: number;
+              error?: string;
+              synced?: { provider: string; days?: number }[];
+              failed?: { provider: string; error?: string }[];
+            }
+          | null;
       }>("/integrations/google/select", {
         method: "POST",
         body: JSON.stringify({
@@ -385,9 +387,27 @@ export default function WebsiteBindings() {
         }),
       });
       setPlatforms(d.platforms);
+      const syncedLabels =
+        d.sync?.synced
+          ?.map((row) =>
+            row.provider === "GOOGLE_ANALYTICS"
+              ? "GA4"
+              : row.provider === "GOOGLE_SEARCH_CONSOLE"
+                ? "GSC"
+                : row.provider === "GOOGLE_ADS"
+                  ? "Ads"
+                  : row.provider
+          )
+          .join(", ") || "";
       const syncNote =
         d.sync?.ok === false
-          ? ` Connected, sync failed: ${d.sync.error}`
+          ? ` Connected, sync needs review: ${
+              d.sync.error ||
+              d.sync.failed?.map((row) => row.error).filter(Boolean).join("; ") ||
+              "one or more sources failed"
+            }`
+          : syncedLabels
+            ? ` Synced ${syncedLabels}.`
           : d.sync?.days != null
             ? ` Synced ${d.sync.days} days.`
             : "";
@@ -527,31 +547,14 @@ export default function WebsiteBindings() {
     if (p.key === "GOOGLE_ADS") {
       if (actions.includes("connect") || actions.includes("reconnect")) {
         return (
-          <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {(agencyLinked) && (
-              <button
-                className="primary-button"
-                type="button"
-                disabled={busy === "connect-ads"}
-                onClick={connectGoogleAds}
-              >
-                {busy === "connect-ads"
-                  ? "Working…"
-                  : "Use portal Google for Ads"}
-              </button>
-            )}
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={busy === "connect-ads-local"}
-              onClick={connectWebsiteGoogleAds}
-              title="Sign in with the Google that owns this client's Ads (does not replace agency login)"
-            >
-              {busy === "connect-ads-local"
-                ? "Redirecting…"
-                : "Connect this site's Google"}
-            </button>
-          </span>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={busy === "connect-ads"}
+            onClick={connectGoogleAds}
+          >
+            {busy === "connect-ads" ? "Working…" : "Use agency Google for Ads"}
+          </button>
         );
       }
       if (actions.includes("select")) {
@@ -562,40 +565,23 @@ export default function WebsiteBindings() {
             disabled={busy === "resources"}
             onClick={() => loadResources().catch((e) => setError(e.message))}
           >
-            Choose Ads account
+            Review Ads access
           </button>
         );
       }
     }
     if (actions.includes("connect") || actions.includes("reconnect")) {
       return (
-        <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {(agencyLinked) && (
-            <button
-              className="primary-button"
-              type="button"
-              disabled={busy === "connect" || busy === "resources"}
-              onClick={() => {
-                connectGoogle().catch(() => undefined);
-              }}
-            >
-              {busy === "connect" ? "Working…" : "Use portal Google"}
-            </button>
-          )}
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={busy === "connect-local"}
-            onClick={connectWebsiteGoogle}
-            title="OAuth with the client's Google for this website only"
-          >
-            {busy === "connect-local"
-              ? "Redirecting…"
-              : agencyLinked
-                ? "Connect this site's Google"
-                : "Connect Google for this website"}
-          </button>
-        </span>
+        <button
+          className="primary-button"
+          type="button"
+          disabled={busy === "connect" || busy === "resources"}
+          onClick={() => {
+            connectGoogle().catch(() => undefined);
+          }}
+        >
+          {busy === "connect" ? "Working…" : "Use agency Google"}
+        </button>
       );
     }
     if (actions.includes("select")) {
@@ -606,7 +592,7 @@ export default function WebsiteBindings() {
           disabled={busy === "resources"}
           onClick={() => loadResources().catch((e) => setError(e.message))}
         >
-          Choose account
+          Review access
         </button>
       );
     }
@@ -642,16 +628,14 @@ export default function WebsiteBindings() {
           <p>
             {agencyLinked ? (
               <>
-                Prefer <strong>Use portal Google</strong> when the client invited
-                your agency email. Use{" "}
-                <strong>Connect this site&apos;s Google</strong> when they sign
-                in themselves — that token stays on this website only.
+                Use the agency Google account clients invited to GA4, Search
+                Console, or Ads. Pick the matching resources below to sync data.
               </>
             ) : (
               <>
-                Connect Google under the <strong>Google</strong> tab first, or
-                use <strong>Connect this site&apos;s Google</strong> for a
-                one-off client login.
+                Connect agency Google under the <strong>Google</strong> tab
+                first, then pick matching GA4 / Search Console / Ads resources
+                for each client website.
               </>
             )}
           </p>
@@ -746,6 +730,9 @@ export default function WebsiteBindings() {
                             value={pickAds}
                             onChange={(e) => setPickAds(e.target.value)}
                           >
+                            {resources.ads.length > 0 && !pickAds && (
+                              <option value="">Choose matching Ads account</option>
+                            )}
                             {resources.ads.length === 0 && (
                               <option value="">
                                 {resources.adsError
@@ -758,6 +745,7 @@ export default function WebsiteBindings() {
                                 {r.name}
                                 {r.account ? ` · ${r.account}` : ""}
                                 {r.currency ? ` · ${r.currency}` : ""}
+                                {resourceSuffix(r)}
                               </option>
                             ))}
                           </select>
@@ -794,6 +782,9 @@ export default function WebsiteBindings() {
                             value={pickGa4}
                             onChange={(e) => setPickGa4(e.target.value)}
                           >
+                            {resources.ga4.length > 0 && !pickGa4 && (
+                              <option value="">Choose matching GA4 property</option>
+                            )}
                             {resources.ga4.length === 0 && (
                               <option value="">No properties found</option>
                             )}
@@ -801,6 +792,7 @@ export default function WebsiteBindings() {
                               <option key={r.id} value={r.id}>
                                 {r.name}
                                 {r.account ? ` (${r.account})` : ""}
+                                {resourceSuffix(r)}
                               </option>
                             ))}
                           </select>
@@ -828,12 +820,16 @@ export default function WebsiteBindings() {
                             value={pickGsc}
                             onChange={(e) => setPickGsc(e.target.value)}
                           >
+                            {resources.gsc.length > 0 && !pickGsc && (
+                              <option value="">Choose matching Search Console site</option>
+                            )}
                             {resources.gsc.length === 0 && (
                               <option value="">No sites found</option>
                             )}
                             {resources.gsc.map((r) => (
                               <option key={r.id} value={r.id}>
                                 {r.name}
+                                {resourceSuffix(r)}
                               </option>
                             ))}
                           </select>

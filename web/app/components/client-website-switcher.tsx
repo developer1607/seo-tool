@@ -131,34 +131,31 @@ export default function ClientWebsiteSwitcher({
             </div>
           )}
         </label>
-        {selectedClient && websites.length > 0 && (
+        {selectedClient ? (
           <label>
             <span className="topbar-context-label">Website</span>
-            {websites.length === 1 ? (
-              <span
-                className="topbar-context-static"
-                title={selectedWebsite?.url || ""}
-              >
-                {selectedWebsite?.url || selectedWebsite?.name || "—"}
-              </span>
-            ) : (
-              <select
-                aria-label="Switch website"
-                value={selectedWebsite?.id || ""}
-                onChange={(e) => {
-                  const id = Number(e.target.value);
-                  if (id) selectWebsite(id);
-                }}
-              >
-                {websites.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
+            <select
+              aria-label="Switch website"
+              disabled={websites.length === 0}
+              value={selectedWebsite?.id || ""}
+              title={selectedWebsite?.url || ""}
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                if (id) selectWebsite(id);
+              }}
+            >
+              {websites.length === 0 ? (
+                <option value="">No websites</option>
+              ) : (
+                websites.map((w) => (
+                  <option key={w.id} value={w.id} title={w.url}>
+                    {w.url || w.name}
                   </option>
-                ))}
-              </select>
-            )}
+                ))
+              )}
+            </select>
           </label>
-        )}
+        ) : null}
       </div>
     </div>
   );

@@ -266,6 +266,17 @@ CREATE TABLE IF NOT EXISTS user_domain_access (
   UNIQUE (user_id, primary_domain)
 );
 
+-- Per-website GSC keyword tracking: custom (always fetch) or hidden (suppress auto top-10).
+CREATE TABLE IF NOT EXISTS website_gsc_keywords (
+  id BIGSERIAL PRIMARY KEY,
+  website_id BIGINT NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+  query TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'custom'
+    CHECK (kind IN ('custom', 'hidden')),
+  created_at TEXT NOT NULL DEFAULT (NOW()::text),
+  UNIQUE (website_id, query)
+);
+
 CREATE INDEX IF NOT EXISTS idx_websites_client ON websites(client_id);
 CREATE INDEX IF NOT EXISTS idx_websites_primary_domain ON websites(primary_domain);
 CREATE INDEX IF NOT EXISTS idx_clients_origin ON clients(origin);
@@ -276,6 +287,7 @@ CREATE INDEX IF NOT EXISTS idx_client_sources_family ON client_sources(family);
 CREATE INDEX IF NOT EXISTS idx_integration_providers_family ON integration_providers(family);
 CREATE INDEX IF NOT EXISTS idx_user_client_access_user ON user_client_access(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_domain_access_domain ON user_domain_access(primary_domain);
+CREATE INDEX IF NOT EXISTS idx_website_gsc_keywords_website ON website_gsc_keywords(website_id);
 CREATE INDEX IF NOT EXISTS idx_connections_client ON connections(client_id);
 CREATE INDEX IF NOT EXISTS idx_connections_website ON connections(website_id);
 CREATE INDEX IF NOT EXISTS idx_connections_status ON connections(status);

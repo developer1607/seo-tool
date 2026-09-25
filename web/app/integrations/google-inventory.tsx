@@ -16,8 +16,23 @@ type Ga4Row = {
   id: string;
   name: string;
   account?: string;
+  accountId?: string;
+  accountName?: string;
+  propertyId?: string;
   url?: string | null;
+  streamUrls?: string[];
   linked: LinkInfo;
+};
+
+type Ga4Account = {
+  id: string;
+  name: string;
+  accountId: string;
+  accountName: string;
+  properties: Ga4Row[];
+  linkedCount: number;
+  availableCount: number;
+  fullyLinked: boolean;
 };
 
 type GscRow = {
@@ -60,6 +75,7 @@ type Discover = {
   imported: number;
   available: number;
   ga4: Ga4Row[];
+  ga4Accounts?: Ga4Account[];
   gsc: GscRow[];
   ads?: AdsRow[];
   adsError?: string | null;
@@ -216,10 +232,45 @@ function GoogleInventory({
     });
   }, [adsSitesLocal, adsTargetClientId, clients]);
 
-  const ga4Filtered = useMemo(() => {
-    const rows = data?.ga4 || [];
-    return rows.filter((r) =>
-      tab === "imported" ? Boolean(r.linked) : !r.linked
+  const ga4AccountsFiltered = useMemo(() => {
+    const accounts = data?.ga4Accounts || [];
+    if (!accounts.length && (data?.ga4 || []).length) {
+      // Fallback group from flat list if older API shape.
+      const map = new Map<string, Ga4Account>();
+      for (const row of data?.ga4 || []) {
+        const accountId = row.accountId || row.account || "unknown";
+        if (!map.has(accountId)) {
+          map.set(accountId, {
+            id: accountId,
+            name: row.accountName || row.account || accountId,
+            accountId,
+            accountName: row.accountName || row.account || accountId,
+            properties: [],
+            linkedCount: 0,
+            availableCount: 0,
+            fullyLinked: false,
+          });
+        }
+        map.get(accountId)!.properties.push(row);
+      }
+      for (const account of map.values()) {
+        account.linkedCount = account.properties.filter((p) => p.linked).length;
+        account.availableCount =
+          account.properties.length - account.linkedCount;
+        account.fullyLinked =
+          account.properties.length > 0 &&
+          account.linkedCount === account.properties.length;
+      }
+      return [...map.values()].filter((account) =>
+        tab === "imported"
+          ? account.linkedCount > 0
+          : account.availableCount > 0
+      );
+    }
+    return accounts.filter((account) =>
+      tab === "imported"
+        ? account.linkedCount > 0
+        : account.availableCount > 0
     );
   }, [data, tab]);
 
@@ -245,6 +296,7 @@ function GoogleInventory({
       name: string;
       client_name?: string;
       url?: string | null;
+      ga4_account_id?: string;
     }[] = [];
     for (const r of data?.ga4 || []) {
       if (r.linked) continue;
@@ -253,8 +305,9 @@ function GoogleInventory({
         kind: "GA4",
         id: r.id,
         name: r.name,
-        client_name: r.account ? `${r.account} — ${r.name}` : r.name,
+        client_name: r.accountName || r.account || r.name,
         url: r.url,
+        ga4_account_id: r.accountId,
       });
     }
     for (const r of data?.gsc || []) {
@@ -327,6 +380,7 @@ function GoogleInventory({
             name: i.name,
             client_name: i.client_name,
             url: i.url || undefined,
+            ga4_account_id: i.ga4_account_id,
           })),
         }),
       });
@@ -347,7 +401,7 @@ function GoogleInventory({
   }
 
   async function connectAgency(opts?: {
-    mode?: "replace" | "add" | "reconnect";
+    mode?: "replace" | "reconnect";
   }) {
     const mode = opts?.mode || "replace";
     const currentEmail =
@@ -355,12 +409,12 @@ function GoogleInventory({
     if (mode === "replace" && (agencyLinked || currentEmail)) {
       const ok = window.confirm(
         currentEmail
-          ? `Reconnect replaces the default Google identity (${currentEmail}). Other linked accounts stay. Continue?`
-          : "Reconnect replaces the default Google identity. Continue?"
+          ? `Reconnect agency Google (${currentEmail})? Continue?`
+          : "Reconnect agency Google? Continue?"
       );
       if (!ok) return;
     }
-    setBusy(mode === "add" ? "add" : "connect");
+    setBusy("connect");
     setError("");
     try {
       const params = new URLSearchParams({
@@ -381,26 +435,6 @@ function GoogleInventory({
     }
   }
 
-  async function selectIdentity(nextId: number) {
-    setIdentityId(nextId);
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", "google");
-    url.searchParams.set("identity_id", String(nextId));
-    router.replace(url.pathname + "?" + url.searchParams.toString());
-    try {
-      await api("/integrations/google/identities/default", {
-        method: "POST",
-        body: JSON.stringify({ identity_id: nextId }),
-      });
-      await refresh();
-    } catch (e) {
-      setError(
-        (e as Error).message ||
-          "Could not set default Google account — Link to website may still use the previous account."
-      );
-    }
-  }
-
   async function syncAccounts() {
     setBusy("sync");
     setMessage("");
@@ -417,25 +451,18 @@ function GoogleInventory({
 
   async function disconnectAgency() {
     const label = data?.email || "this Google account";
-    const multi = (data?.identities?.length || 0) > 1;
     const ok = window.confirm(
-      multi && identityId
-        ? `Disconnect ${label} only? Other Google accounts and their website links stay.`
-        : `Disconnect agency Google (${label})? Website links stay; Connect again to browse inventory.`
+      `Disconnect agency Google (${label})? Website links stay; Connect again to browse inventory.`
     );
     if (!ok) return;
     setBusy("disc");
     try {
       await api("/integrations/google/agency/disconnect", {
         method: "POST",
-        body: JSON.stringify(
-          identityId && multi ? { identity_id: identityId } : {}
-        ),
+        body: JSON.stringify({}),
       });
       setMessage(
-        multi && identityId
-          ? "That Google account was cleared. Other accounts remain."
-          : "Agency Google revoked at Google and cleared here. Website links kept; Connect again to use inventory."
+        "Agency Google revoked at Google and cleared here. Website links kept; Connect again to use inventory."
       );
       setIdentityId(null);
       await load();
@@ -454,6 +481,8 @@ function GoogleInventory({
       const d = await api<{
         client: { id: number };
         repaired?: boolean;
+        attached?: boolean;
+        created?: boolean;
         code?: string;
         sync?: { ok?: boolean; error?: string; days?: number } | null;
       }>("/integrations/google/import", {
@@ -462,9 +491,8 @@ function GoogleInventory({
           kind: "GA4",
           external_account_id: row.id,
           name: row.name,
-          client_name: row.account
-            ? `${row.account} — ${row.name}`
-            : row.name,
+          client_name: row.accountName || row.account || row.name,
+          ga4_account_id: row.accountId,
           url: row.url || undefined,
           sync: true,
           identity_id: identityId || undefined,
@@ -473,7 +501,7 @@ function GoogleInventory({
       await refresh();
       if (d.sync && d.sync.ok === false) {
         setMessage(
-          `Imported ${row.name}, but sync failed: ${d.sync.error || "unknown"}. Open Integrations → Sync.`
+          `Imported ${row.name}, but sync failed: ${d.sync.error || "unknown"}. Open the client and sync.`
         );
         setBusy(null);
         router.push(`/clients/${d.client.id}`);
@@ -482,7 +510,9 @@ function GoogleInventory({
       setMessage(
         d.repaired
           ? `Reconnected Google for ${row.name}`
-          : `Imported ${row.name}`
+          : d.attached && !d.created
+            ? `Added ${row.name} as a website under the existing client`
+            : `Imported ${row.name}`
       );
       router.push(`/clients/${d.client.id}`);
     } catch (e) {
@@ -493,6 +523,69 @@ function GoogleInventory({
         return;
       }
       setError(err.message);
+      setBusy(null);
+    }
+  }
+
+  async function importGa4Account(
+    account: Ga4Account,
+    scope: "all" | "selected"
+  ) {
+    const availableProps = account.properties.filter((p) => !p.linked);
+    const propertyIds =
+      scope === "selected"
+        ? availableProps
+            .filter((p) => selected[`GA4:${p.id}`])
+            .map((p) => p.id)
+        : availableProps.map((p) => p.id);
+    if (!propertyIds.length) {
+      setError(
+        scope === "selected"
+          ? "Select at least one property under this account."
+          : "No available properties left on this account."
+      );
+      return;
+    }
+    setBusy(`account:${account.accountId}`);
+    setError("");
+    setBulkProgress(
+      `Importing ${propertyIds.length} website(s) from ${account.accountName}…`
+    );
+    try {
+      const d = await api<{
+        client: { id: number };
+        created?: boolean;
+        summary?: {
+          websites?: number;
+          linked?: number;
+          failed?: number;
+          skipped?: number;
+        };
+      }>("/integrations/google/import-account", {
+        method: "POST",
+        body: JSON.stringify({
+          ga4_account_id: account.accountId,
+          property_ids: propertyIds,
+          sync: true,
+          identity_id: identityId || undefined,
+        }),
+      });
+      setBulkProgress("");
+      const s = d.summary;
+      setMessage(
+        `${d.created ? "Created" : "Updated"} client ${account.accountName} — ${
+          s?.websites ?? propertyIds.length
+        } website(s), ${s?.linked ?? 0} links, ${s?.skipped ?? 0} skipped, ${
+          s?.failed ?? 0
+        } failed.`
+      );
+      clearSelection();
+      await refresh();
+      await load();
+      router.push(`/clients/${d.client.id}`);
+    } catch (e) {
+      setBulkProgress("");
+      setError((e as Error).message);
       setBusy(null);
     }
   }
@@ -595,8 +688,9 @@ function GoogleInventory({
             <p className="eyebrow">DATA SOURCES</p>
             <h1>Google accounts</h1>
             <p className="muted">
-              Connect agency Google once. Sync lists properties; Import/Link
-              attaches them to clients.
+              Connect agency Google once. For multi-property Analytics accounts,
+              use <strong>Import client with all websites</strong> (one client,
+              many websites).
             </p>
           </div>
           <div className="heading-actions">
@@ -613,14 +707,6 @@ function GoogleInventory({
                   onClick={syncAccounts}
                 >
                   {busy === "sync" || loading ? "Syncing…" : "Sync accounts"}
-                </button>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  disabled={!!busy}
-                  onClick={() => connectAgency({ mode: "add" })}
-                >
-                  {busy === "add" ? "Redirecting…" : "Add Google account"}
                 </button>
                 <button
                   className="secondary-button"
@@ -783,42 +869,9 @@ function GoogleInventory({
                   {data?.updatedAt ? ` · token ${data.updatedAt}` : ""}
                 </span>
               </div>
-              {(data?.identities?.length || 0) > 0 && (
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    padding: "0 4px 8px",
-                    alignItems: "center",
-                  }}
-                >
-                  <span className="muted" style={{ fontSize: 13 }}>
-                    Google account:
-                  </span>
-                  {(data?.identities || []).map((idRow) => (
-                    <button
-                      key={idRow.id}
-                      type="button"
-                      className={
-                        (identityId || data?.identityId) === idRow.id
-                          ? "primary-button"
-                          : "secondary-button"
-                      }
-                      style={{ padding: "4px 10px", fontSize: 13 }}
-                      onClick={() => selectIdentity(idRow.id)}
-                    >
-                      {idRow.email || idRow.displayName || `Account ${idRow.id}`}
-                      {idRow.isDefault ? " · default" : ""}
-                    </button>
-                  ))}
-                </div>
-              )}
               <p className="muted" style={{ margin: "0 4px 12px" }}>
-                Import and Sync use the selected Google account.{" "}
-                <strong>Add Google account</strong> links another Gmail without
-                overwriting this one. Reconnect refreshes only the selected
-                identity.
+                Import and Sync use the agency Google account. Reconnect
+                refreshes agency access when Google permissions change.
               </p>
               <div
                 style={{
@@ -888,6 +941,209 @@ function GoogleInventory({
 
             {loading && <p className="muted">Loading accounts from Google…</p>}
 
+            {!loading && (kind === "all" || kind === "ga4") && (
+              <section className="panel" style={{ marginBottom: 16 }}>
+                <div className="panel-header">
+                  <div>
+                    <h2>GA4 accounts</h2>
+                    <p className="muted">
+                      {tab === "available"
+                        ? "Preferred: one Analytics account → one client; each property becomes a website. Matching Search Console / Ads link by ID/domain."
+                        : "Accounts with at least one linked property"}
+                    </p>
+                  </div>
+                </div>
+                <div className="website-list">
+                  {ga4AccountsFiltered.map((account) => {
+                    const availableProps = account.properties.filter(
+                      (p) => !p.linked
+                    );
+                    const selectedCount = availableProps.filter(
+                      (p) => selected[`GA4:${p.id}`]
+                    ).length;
+                    const accountBusy =
+                      busy === `account:${account.accountId}`;
+                    const visibleProps =
+                      tab === "imported"
+                        ? account.properties.filter((p) => p.linked)
+                        : account.properties;
+                    const multiProperty = account.properties.length > 1;
+                    const showRowImport =
+                      tab === "available" &&
+                      (!multiProperty || account.linkedCount > 0);
+                    return (
+                      <div
+                        key={account.accountId}
+                        style={{
+                          display: "block",
+                          padding: "12px 8px",
+                          borderBottom: "1px solid var(--border, #e5e7eb)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 12,
+                            alignItems: "flex-start",
+                            flexWrap: "wrap",
+                            marginBottom: 8,
+                          }}
+                        >
+                          <span className="site-favicon">G</span>
+                          <span style={{ flex: 1, minWidth: 200 }}>
+                            <strong>
+                              {account.accountName} ({account.accountId})
+                            </strong>
+                            <small>
+                              {account.properties.length} propert
+                              {account.properties.length === 1 ? "y" : "ies"}
+                              {tab === "available"
+                                ? ` · ${account.availableCount} available`
+                                : ` · ${account.linkedCount} linked`}
+                              {multiProperty && tab === "available"
+                                ? " · use Import client with all websites"
+                                : ""}
+                            </small>
+                          </span>
+                          {tab === "available" && availableProps.length > 0 ? (
+                            <span
+                              style={{
+                                display: "flex",
+                                gap: 8,
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <button
+                                className="primary-button"
+                                type="button"
+                                disabled={!!busy}
+                                onClick={() =>
+                                  importGa4Account(account, "all").catch(
+                                    () => undefined
+                                  )
+                                }
+                              >
+                                {accountBusy
+                                  ? "Importing…"
+                                  : multiProperty
+                                    ? account.linkedCount > 0
+                                      ? `Import remaining websites (${availableProps.length})`
+                                      : `Import client with all websites (${availableProps.length})`
+                                    : `Import client (${availableProps.length})`}
+                              </button>
+                              {multiProperty ? (
+                                <button
+                                  className="secondary-button"
+                                  type="button"
+                                  disabled={!!busy || selectedCount === 0}
+                                  onClick={() =>
+                                    importGa4Account(account, "selected").catch(
+                                      () => undefined
+                                    )
+                                  }
+                                >
+                                  Import selected ({selectedCount})
+                                </button>
+                              ) : null}
+                            </span>
+                          ) : null}
+                          {tab === "imported" &&
+                          account.properties.find((p) => p.linked)?.linked ? (
+                            <Link
+                              className="secondary-button"
+                              href={`/clients/${
+                                account.properties.find((p) => p.linked)!
+                                  .linked!.client_id
+                              }`}
+                            >
+                              Open client
+                            </Link>
+                          ) : null}
+                        </div>
+                        <div style={{ paddingLeft: 40 }}>
+                          {visibleProps.map((row) => (
+                            <div
+                              key={row.id}
+                              style={{
+                                display: "flex",
+                                gap: 10,
+                                alignItems: "center",
+                                flexWrap: "wrap",
+                                padding: "6px 0",
+                              }}
+                            >
+                              {!row.linked &&
+                              tab === "available" &&
+                              multiProperty ? (
+                                <label
+                                  style={{
+                                    display: "grid",
+                                    placeItems: "center",
+                                    width: 28,
+                                  }}
+                                  title="Select for Import selected"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(selected[`GA4:${row.id}`])}
+                                    disabled={!!busy}
+                                    onChange={() =>
+                                      toggleSelect(`GA4:${row.id}`)
+                                    }
+                                  />
+                                </label>
+                              ) : (
+                                <span className="site-favicon">P</span>
+                              )}
+                              <span style={{ flex: 1, minWidth: 180 }}>
+                                <strong>
+                                  {row.name} ({row.id})
+                                </strong>
+                                <small>
+                                  {row.url ||
+                                    "No web stream URL — import still works (URL from Search Console or pending)"}
+                                </small>
+                              </span>
+                              {row.linked ? (
+                                <Link
+                                  className="secondary-button"
+                                  href={`/clients/${row.linked.client_id}`}
+                                >
+                                  Open
+                                </Link>
+                              ) : showRowImport ? (
+                                <button
+                                  className="text-button"
+                                  type="button"
+                                  disabled={!!busy}
+                                  onClick={() => importGa4(row)}
+                                >
+                                  {busy === row.id
+                                    ? "Importing…"
+                                    : account.linkedCount > 0
+                                      ? "Add as website"
+                                      : "Import"}
+                                </button>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!ga4AccountsFiltered.length && (
+                    <div className="empty-section">
+                      <p>
+                        {tab === "available"
+                          ? "No unused GA4 accounts/properties (or Sync to refresh)."
+                          : "No imported GA4 properties yet."}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
             {!loading &&
               connected &&
               !data?.needsReauth &&
@@ -896,12 +1152,13 @@ function GoogleInventory({
                 <section className="panel" style={{ marginBottom: 16 }}>
                   <div className="panel-header">
                     <div>
-                      <h2>Bulk import</h2>
+                      <h2>Leftover single imports</h2>
                       <p className="muted">
-                        Creates clients + websites + GA4/GSC links. Order: GA4
-                        first (auto-links matching Search Console), then leftover
-                        GSC. Same-hostname rows attach to an existing website.
-                        Google Ads are not bulk-imported — link those per site.
+                        Prefer <strong>GA4 accounts</strong> above —{" "}
+                        <strong>Import client with all websites</strong> keeps
+                        one client per Analytics account. This path is only for
+                        leftover single GA4/GSC rows (can create one client per
+                        row).
                       </p>
                     </div>
                   </div>
@@ -916,7 +1173,7 @@ function GoogleInventory({
                   >
                     <button
                       type="button"
-                      className="primary-button"
+                      className="secondary-button"
                       disabled={!!busy}
                       onClick={() => {
                         runBulkImport("all").catch(() => undefined);
@@ -924,17 +1181,17 @@ function GoogleInventory({
                     >
                       {busy === "bulk"
                         ? bulkProgress || "Importing…"
-                        : `Import all available (${availableBulkItems.length})`}
+                        : `Import leftover (${availableBulkItems.length})`}
                     </button>
                     <button
                       type="button"
-                      className="secondary-button"
+                      className="text-button"
                       disabled={!!busy || selectedKeys.length === 0}
                       onClick={() => {
                         runBulkImport("selected").catch(() => undefined);
                       }}
                     >
-                      Import selected ({selectedKeys.length})
+                      Import selected leftover ({selectedKeys.length})
                     </button>
                     <button
                       type="button"
@@ -960,83 +1217,6 @@ function GoogleInventory({
                   ) : null}
                 </section>
               )}
-
-            {!loading && (kind === "all" || kind === "ga4") && (
-              <section className="panel" style={{ marginBottom: 16 }}>
-                <div className="panel-header">
-                  <div>
-                    <h2>GA4 properties</h2>
-                    <p className="muted">
-                      {tab === "available"
-                        ? "Not yet in Webastral — import creates Client + Website"
-                        : "Already linked to a client"}
-                    </p>
-                  </div>
-                </div>
-                <div className="website-list">
-                  {ga4Filtered.map((row) => (
-                    <div key={row.id}>
-                      {!row.linked && tab === "available" ? (
-                        <label
-                          style={{
-                            display: "grid",
-                            placeItems: "center",
-                            width: 28,
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={Boolean(selected[`GA4:${row.id}`])}
-                            disabled={!!busy}
-                            onChange={() => toggleSelect(`GA4:${row.id}`)}
-                          />
-                        </label>
-                      ) : (
-                        <span className="site-favicon">G</span>
-                      )}
-                      <span>
-                        <strong>{row.name}</strong>
-                        <small>
-                          {row.url || "No web stream URL"}
-                          {row.account ? ` · ${row.account}` : ""}
-                        </small>
-                      </span>
-                      {row.linked ? (
-                        <Link
-                          className="secondary-button"
-                          href={`/clients/${row.linked.client_id}`}
-                        >
-                          Open client
-                        </Link>
-                      ) : (
-                        <button
-                          className="primary-button"
-                          type="button"
-                          disabled={!!busy}
-                          title={
-                            row.url
-                              ? undefined
-                              : "URL resolved on import from GA4 stream or matching Search Console"
-                          }
-                          onClick={() => importGa4(row)}
-                        >
-                          {busy === row.id ? "Importing…" : "Import"}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {!ga4Filtered.length && (
-                    <div className="empty-section">
-                      <p>
-                        {tab === "available"
-                          ? "No unused GA4 properties (or Sync to refresh)."
-                          : "No imported GA4 properties yet."}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </section>
-            )}
 
             {!loading && (kind === "all" || kind === "gsc") && (
               <section className="panel" style={{ marginBottom: 16 }}>
@@ -1072,7 +1252,9 @@ function GoogleInventory({
                         <span className="site-favicon">S</span>
                       )}
                       <span>
-                        <strong>{row.name}</strong>
+                        <strong>
+                          {row.name} ({row.id})
+                        </strong>
                         <small>{row.url || row.name}</small>
                       </span>
                       {row.linked ? (
@@ -1190,10 +1372,11 @@ function GoogleInventory({
                     <div key={row.id}>
                       <span className="site-favicon">A</span>
                       <span>
-                        <strong>{row.name}</strong>
+                        <strong>
+                          {row.name} ({row.id})
+                        </strong>
                         <small>
-                          {row.id}
-                          {row.account ? ` · ${row.account}` : ""}
+                          {row.account ? `${row.account}` : "Ads"}
                           {row.currency ? ` · ${row.currency}` : ""}
                         </small>
                       </span>

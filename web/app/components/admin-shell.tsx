@@ -125,6 +125,10 @@ type StaleSyncResult = {
   skipped?: { provider: string; reason?: string }[];
   failed?: { provider: string; error?: string; reason?: string }[];
   fresh?: { provider: string }[];
+  refreshed?: {
+    linked?: { provider: string; account?: string }[];
+    failed?: { provider?: string; error?: string }[];
+  };
 };
 
 const visitSyncInflight = new Map<string, Promise<StaleSyncResult>>();
@@ -217,8 +221,7 @@ export default function AdminShell({
     if (!providers.length) return;
 
     let cancelled = false;
-    let slowTimer: number | undefined;
-    slowTimer = window.setTimeout(() => {
+    const slowTimer = window.setTimeout(() => {
       if (!cancelled) setVisitBusy(true);
     }, 800);
 
@@ -320,56 +323,58 @@ export default function AdminShell({
     if (!selectedWebsite || syncBusy) return;
     setSyncBusy(true);
     setSyncNote("");
-    const providers = [
-      "GOOGLE_ANALYTICS",
-      "GOOGLE_SEARCH_CONSOLE",
-      "GOOGLE_ADS",
-      ...(platform?.meta ? (["META_ADS"] as const) : []),
-    ] as const;
-    const ok: string[] = [];
-    const failed: string[] = [];
-    const skipped: string[] = [];
     try {
-      for (const provider of providers) {
-        try {
-          const d = await api<{ days?: number }>(
-            `/integrations/${provider}/sync`,
-            {
-              method: "POST",
-              body: JSON.stringify({ website_id: selectedWebsite.id }),
-            }
-          );
-          ok.push(
-            d.days != null
-              ? `${PROVIDER_LABELS[provider]} (${d.days}d)`
-              : PROVIDER_LABELS[provider]
-          );
-        } catch (e) {
-          const msg = (e as Error).message || "";
-          if (/not active/i.test(msg)) {
-            skipped.push(PROVIDER_LABELS[provider]);
-            continue;
-          }
-          if (/expired|revoked|reauth|reconnect/i.test(msg)) {
-            failed.push(`${PROVIDER_LABELS[provider]}: reconnect Google`);
-            continue;
-          }
-          failed.push(`${PROVIDER_LABELS[provider]}: ${msg}`);
-        }
-      }
+      const d = await api<StaleSyncResult>("/integrations/sync-now", {
+        method: "POST",
+        body: JSON.stringify({ website_id: selectedWebsite.id }),
+      });
       await refresh();
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("webastral:synced"));
       }
       const parts: string[] = [];
-      if (ok.length) parts.push(`Synced ${ok.join(" · ")}`);
-      if (failed.length) parts.push(failed.join("; "));
-      if (!ok.length && !failed.length && skipped.length) {
+      const linked = d.refreshed?.linked || [];
+      const synced = d.synced || [];
+      const failed = [
+        ...(d.refreshed?.failed || []),
+        ...(d.failed || []),
+      ];
+      const skipped = d.skipped || [];
+      if (linked.length) {
+        parts.push(
+          `Linked ${linked
+            .map((row) => PROVIDER_LABELS[row.provider] || row.provider)
+            .join(" · ")}`
+        );
+      }
+      if (synced.length) {
+        parts.push(
+          `Synced ${synced
+            .map((row) => {
+              const label = PROVIDER_LABELS[row.provider] || row.provider;
+              return row.days != null ? `${label} (${row.days}d)` : label;
+            })
+            .join(" · ")}`
+        );
+      }
+      if (failed.length) {
+        parts.push(
+          failed
+            .map((row) => {
+              const label = PROVIDER_LABELS[row.provider || ""] || row.provider || "Sync";
+              const msg = row.error || "failed";
+              if (/expired|revoked|reauth|reconnect/i.test(msg)) {
+                return `${label}: reconnect`;
+              }
+              return `${label}: ${msg}`;
+            })
+            .join("; ")
+        );
+      }
+      if (!linked.length && !synced.length && !failed.length && skipped.length) {
         parts.push(
           "Nothing active to sync — connect or reconnect on Integrations."
         );
-      } else if (skipped.length && failed.some((f) => /reconnect/i.test(f))) {
-        parts.push("Open Integrations → Reconnect Google.");
       }
       setSyncNote(parts.join(" ") || "Sync finished.");
     } catch (e) {

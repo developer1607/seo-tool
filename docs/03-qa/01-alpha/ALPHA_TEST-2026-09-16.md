@@ -95,20 +95,21 @@ From [Deploy](6a956083-87fd-4064-85ad-dcc7c0a21826) ops alpha:
 
 **Avoid:** file-backed SQLite on Vercel/Cloudflare serverless; Render free without durable disk; promising “truly free long-term” without a volume.
 
+**Update 2026-09-21:** product DB is **PostgreSQL** (`DATABASE_URL`). For shared testers / public URL use **managed Postgres** (Neon / Supabase / Railway), not laptop embedded `data/pg-utf8`. Full P0 steps: [`P0_TESTER_AND_DEPLOY.md`](./P0_TESTER_AND_DEPLOY.md).
+
 **P0 before sharing a public URL**
-1. Persistent volume mounted so `db/app.sqlite` survives restart/redeploy  
-2. Env: `AUTH_SECRET`, `APP_ENCRYPTION_KEY`, `APP_URL`, `GOOGLE_*`, `PORT` (changing encryption key forces reconnects)  
-3. Probe: `GET /health` → `{ ok: true }`  
-4. OAuth redirect URIs match public `APP_URL`  
-5. No multi-replica API against one SQLite file  
+1. Managed Postgres + `DATABASE_URL` on the API (survive restart/redeploy)  
+2. Env: `AUTH_SECRET`, `APP_ENCRYPTION_KEY`, public web origin, `GOOGLE_*`, `META_*`, `PORT` (changing encryption key forces reconnects)  
+3. Probe: `GET /api/health` → `{ ok: true, db: "up" }`  
+4. OAuth redirect URIs match public web origin (`GOOGLE_REDIRECT_URI`, `META_REDIRECT_URI`)  
+5. Single API instance against one DB is fine; no SQLite on serverless  
 
 **Scale hardening (before large portfolios / long ranges)**
 - Cap/paginate snapshot reads (`metrics/views.js` currently loads full ranges into memory)  
 - SQL aggregates instead of `SELECT *` + JS filter where possible  
 - Transaction + single-flight lock per website/provider sync; chunk long date windows  
-- SQLite busy timeout + write queue for concurrent import/sync  
 - Keep bulk cap; don’t auto-sync every imported site at high count  
-- Rate-limit login / OAuth / import; backup/export the SQLite file  
+- Rate-limit login / OAuth / import; backup managed Postgres  
 
 **Ops rule:** keep **≤30–50 websites** active on free tier; Sync sites you care about; chunk Import all past ~80.
 
@@ -116,15 +117,18 @@ From [Deploy](6a956083-87fd-4064-85ad-dcc7c0a21826) ops alpha:
 
 ## Alpha test checklist (manual — run before sharing URL)
 
+Use the fuller sheet: [`P0_TESTER_AND_DEPLOY.md`](./P0_TESTER_AND_DEPLOY.md).
+
 - [ ] `npm run dev` → login → Agency  
 - [ ] Brand **Webastral**  
 - [ ] Connect Google → Sync accounts → **Import all available** (or ≤80 selected)  
 - [ ] Open a client → Overview → header Sync  
 - [ ] `/platforms/ga4` charts  
 - [ ] Generate report → Export PDF  
-- [ ] Phone width: ☰ opens full nav; Clients → Add Client / Reports children reachable  
-- [ ] `curl https://YOUR_HOST/health` → `{ ok: true }`  
-- [ ] Restart host once — **clients still there** (volume OK)
+- [ ] Meta → **Create client & link** → Clients **Meta** badge  
+- [ ] Phone width: ☰ opens full nav  
+- [ ] `curl https://YOUR_API/api/health` → `{ ok: true }`  
+- [ ] Restart host once — **clients still there** (managed PG OK)
 
 ---
 

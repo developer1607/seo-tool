@@ -26,23 +26,66 @@ type SeriesPoint = {
 
 type PieSlice = { name: string; value: number };
 
-const PRIOR_COLOR = "#b0afbb";
+const C = {
+  prior: "#b9c0cc",
+  grid: "#eceff3",
+  muted: "#98a2b3",
+  ink: "#101828",
+  panel: "#ffffff",
+  purple: "#2f6fed",
+  blue: "#2f6fed",
+  green: "#12b76a",
+  orange: "#f08a24",
+  pink: "#e24c3b",
+};
+
+const PRIOR_COLOR = C.prior;
 
 function shortDate(d: string) {
   return d.length >= 10 ? d.slice(5) : d;
 }
 
+function weekdayLabel(dateStr: string) {
+  const d = new Date(`${dateStr}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return shortDate(dateStr);
+  return d.toLocaleDateString("en-US", { weekday: "short" });
+}
+
 function tipStyle() {
   return {
-    background: "#fff",
-    border: "1px solid #e9e8f0",
-    borderRadius: 8,
+    background: "rgba(255,255,255,0.98)",
+    border: "1px solid #e4e7ec",
+    borderRadius: 10,
+    color: C.ink,
     fontSize: 11,
-    boxShadow: "0 8px 24px #25243914",
+    boxShadow: "0 8px 24px rgba(16,24,40,0.08)",
   };
 }
 
-/** Align current vs prior by day index (Day 1 of each window side-by-side). */
+function chartId(key: string) {
+  return key.replace(/[^a-zA-Z0-9]/g, "-");
+}
+
+function compactNumber(value: number | string) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  return Intl.NumberFormat("en", {
+    notation: Math.abs(n) >= 10000 ? "compact" : "standard",
+    maximumFractionDigits: Math.abs(n) >= 1000 ? 1 : 0,
+  }).format(n);
+}
+
+function metricValue(def: ReportKpiDef, value: unknown) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  const formatted = Intl.NumberFormat("en", {
+    maximumFractionDigits: def.digits,
+    minimumFractionDigits: def.digits > 0 ? 1 : 0,
+  }).format(n);
+  return def.suffix ? `${formatted}${def.suffix}` : formatted;
+}
+
+/** Align current vs prior by day index (this Mon vs last Mon on equal windows). */
 export function alignPeriodSeries(
   current: SeriesPoint[],
   prior: SeriesPoint[],
@@ -55,6 +98,7 @@ export function alignPeriodSeries(
     String(a.date).localeCompare(String(b.date))
   );
   const n = Math.max(cur.length, pri.length, 1);
+  const useWeekday = n > 0 && n <= 14;
   const points: {
     label: string;
     thisPeriod: number;
@@ -67,9 +111,13 @@ export function alignPeriodSeries(
     const p = pri[i];
     points.push({
       label: c
-        ? shortDate(String(c.date))
+        ? useWeekday
+          ? weekdayLabel(String(c.date))
+          : shortDate(String(c.date))
         : p
-          ? `P${shortDate(String(p.date))}`
+          ? useWeekday
+            ? weekdayLabel(String(p.date))
+            : `P${shortDate(String(p.date))}`
           : `D${i + 1}`,
       thisPeriod: c ? Number(c[field]) || 0 : 0,
       priorPeriod: p ? Number(p[field]) || 0 : 0,
@@ -132,7 +180,9 @@ export default function ReportKpiChart({
       );
     }
     const fills =
-      periodSlices.length >= 1 ? [color, PRIOR_COLOR] : ["#6658d3", "#5c9ed1", "#58ae91", "#e68a58"];
+      periodSlices.length >= 1
+        ? [color, PRIOR_COLOR]
+        : [C.purple, C.blue, C.green, C.orange, C.pink];
     return (
       <div className="report-kpi-chart-body">
         <ResponsiveContainer width="100%" height={168}>
@@ -143,8 +193,12 @@ export default function ReportKpiChart({
               nameKey="name"
               cx="50%"
               cy="50%"
-              outerRadius={54}
+              innerRadius={30}
+              outerRadius={58}
+              paddingAngle={2}
+              cornerRadius={5}
               isAnimationActive={false}
+              labelLine={false}
               label={({ name, percent }: { name?: string; percent?: number }) =>
                 `${name || ""} ${Math.round((percent || 0) * 100)}%`
               }
@@ -153,8 +207,17 @@ export default function ReportKpiChart({
                 <Cell key={i} fill={fills[i % fills.length]} />
               ))}
             </Pie>
-            <Tooltip contentStyle={tipStyle()} />
-            <Legend wrapperStyle={{ fontSize: 10 }} />
+            <Tooltip
+              contentStyle={tipStyle()}
+              formatter={(value) => [
+                metricValue(def, value),
+                "Value",
+              ]}
+            />
+            <Legend
+              iconType="circle"
+              wrapperStyle={{ fontSize: 10, color: C.muted }}
+            />
           </PieChart>
         </ResponsiveContainer>
       </div>
@@ -185,18 +248,40 @@ export default function ReportKpiChart({
 
   const common = (
     <>
-      <CartesianGrid stroke="#edecf2" strokeDasharray="3 3" />
-      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#8a8798" }} />
+      <defs>
+        <linearGradient id={`${chartId(def.key)}Fill`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={0.32} />
+          <stop offset="100%" stopColor={color} stopOpacity={0.03} />
+        </linearGradient>
+        <linearGradient id={`${chartId(def.key)}PriorFill`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={PRIOR_COLOR} stopOpacity={0.24} />
+          <stop offset="100%" stopColor={PRIOR_COLOR} stopOpacity={0.02} />
+        </linearGradient>
+      </defs>
+      <CartesianGrid stroke={C.grid} strokeDasharray="3 3" vertical={false} />
+      <XAxis
+        dataKey="label"
+        axisLine={false}
+        tickLine={false}
+        tick={{ fontSize: 10, fill: C.muted }}
+      />
       <YAxis
         width={36}
-        tick={{ fontSize: 10, fill: "#8a8798" }}
+        axisLine={false}
+        tickLine={false}
+        tick={{ fontSize: 10, fill: C.muted }}
+        tickFormatter={compactNumber}
         {...yProps}
       />
       <Tooltip
         contentStyle={tipStyle()}
-        formatter={(value: number | string, name: string) => [
-          value,
-          name === "thisPeriod" ? thisLabel : name === "priorPeriod" ? priorLabel : name,
+        formatter={(value, name) => [
+          metricValue(def, value),
+          name === "thisPeriod"
+            ? thisLabel
+            : name === "priorPeriod"
+              ? priorLabel
+              : String(name),
         ]}
         labelFormatter={(label, payload) => {
           const row = payload?.[0]?.payload as
@@ -215,7 +300,8 @@ export default function ReportKpiChart({
         }}
       />
       <Legend
-        wrapperStyle={{ fontSize: 10 }}
+        iconType="circle"
+        wrapperStyle={{ fontSize: 10, color: C.muted }}
         formatter={(value) =>
           value === "thisPeriod"
             ? thisLabel
@@ -240,14 +326,14 @@ export default function ReportKpiChart({
               dataKey="priorPeriod"
               name="priorPeriod"
               fill={PRIOR_COLOR}
-              radius={[3, 3, 0, 0]}
+              radius={[6, 6, 0, 0]}
               isAnimationActive={false}
             />
             <Bar
               dataKey="thisPeriod"
               name="thisPeriod"
               fill={color}
-              radius={[3, 3, 0, 0]}
+              radius={[6, 6, 0, 0]}
               isAnimationActive={false}
             />
           </BarChart>
@@ -262,9 +348,9 @@ export default function ReportKpiChart({
               dataKey="priorPeriod"
               name="priorPeriod"
               stroke={PRIOR_COLOR}
-              fill={PRIOR_COLOR}
-              fillOpacity={0.12}
+              fill={`url(#${chartId(def.key)}PriorFill)`}
               strokeWidth={2}
+              strokeDasharray="4 4"
               isAnimationActive={false}
             />
             <Area
@@ -272,9 +358,8 @@ export default function ReportKpiChart({
               dataKey="thisPeriod"
               name="thisPeriod"
               stroke={color}
-              fill={color}
-              fillOpacity={0.2}
-              strokeWidth={2}
+              fill={`url(#${chartId(def.key)}Fill)`}
+              strokeWidth={2.5}
               isAnimationActive={false}
             />
           </AreaChart>
@@ -292,6 +377,7 @@ export default function ReportKpiChart({
               strokeWidth={2}
               strokeDasharray="4 3"
               dot={false}
+              strokeLinecap="round"
               isAnimationActive={false}
             />
             <Line
@@ -299,8 +385,10 @@ export default function ReportKpiChart({
               dataKey="thisPeriod"
               name="thisPeriod"
               stroke={color}
-              strokeWidth={2}
+              strokeWidth={2.5}
               dot={false}
+              activeDot={{ r: 4, strokeWidth: 0 }}
+              strokeLinecap="round"
               isAnimationActive={false}
             />
           </LineChart>

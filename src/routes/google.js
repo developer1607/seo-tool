@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const express = require('express');
 const { getWebsite, createWebsite, listWebsites } = require('../lib/websites');
@@ -24,7 +24,7 @@ const {
   fetchGoogleUserInfo,
   revokeGoogleToken,
 } = require('../lib/google/oauth');
-const { listGa4Properties, enrichGa4WithUrls, getGa4PropertyWebsiteUrl, normalizeWebsiteUrl } = require('../lib/google/ga4');
+const { listGa4Properties, listGa4AccountGroups, enrichGa4WithUrls, getGa4PropertyWebsiteUrl, normalizeWebsiteUrl } = require('../lib/google/ga4');
 const { listGscSites } = require('../lib/google/gsc');
 const {
   adsConfigured,
@@ -35,6 +35,7 @@ const {
   getAccessTokenForWebsite,
   probeAndActivate,
   syncProvider,
+  syncAvailableGoogleProviders,
 } = require('../lib/google/sync');
 const {
   syncStaleProviders,
@@ -62,8 +63,13 @@ const { getDb } = require('../lib/db');
 const {
   importGoogleAsset,
   importGoogleAssetsBulk,
+  importGoogleAccount,
   guessUrlFromGsc,
+  hostKey,
 } = require('../lib/google/importAsset');
+const {
+  withResourceRecommendations,
+} = require('../lib/google/resourceMatch');
 const {
   linkGoogleLoginIdentity,
 } = require('../lib/auth/identities');
@@ -98,6 +104,10 @@ function providerLabel(provider) {
   if (provider === 'GOOGLE_SEARCH_CONSOLE') return 'Search Console';
   if (provider === 'GOOGLE_ADS') return 'Google Ads';
   return provider;
+}
+
+function withRecommendation(rows, site, client, currentId, idFn = (r) => r.id) {
+  return withResourceRecommendations(rows, site, client, currentId, idFn);
 }
 
 function platformsForUser(websiteId, userId) {
@@ -215,6 +225,20 @@ router.get('/integrations/google/start', requireAuth, (req, res) => {
     return res.redirect(url);
   }
 
+  if (req.query.force === '1' || req.query.local === '1') {
+    const error =
+      'Client-specific Google OAuth is disabled. Connect agency Google once, then select this website’s GA4 / Search Console / Ads resources.';
+    if (req.query.format === 'json') {
+      return res.status(400).json({
+        error,
+        code: 'LOCAL_GOOGLE_DISABLED',
+      });
+    }
+    return res.redirect(
+      `${appBase()}/integrations?google_error=${encodeURIComponent(error)}`
+    );
+  }
+
   const owned = resolveOwnedWebsite(
     req,
     req.query.website_id || req.selectedWebsite?.id
@@ -243,8 +267,7 @@ router.get('/integrations/google/start', requireAuth, (req, res) => {
   }
 
   const existingOnSite = findGoogleTokenConnection(site.id);
-  const forceLocal = req.query.force === '1' || req.query.local === '1';
-  const agency = forceLocal ? null : findAnyGoogleEncryptedToken(req.user.id);
+  const agency = findAnyGoogleEncryptedToken(req.user.id);
   const adminRow = getAdminGoogleToken(req.user.id);
   const existingToken = existingOnSite ||
     (agency
@@ -255,10 +278,7 @@ router.get('/integrations/google/start', requireAuth, (req, res) => {
       : null);
   const needsAdsScope =
     list.includes('GOOGLE_ADS') && !tokenHasAdsScope(existingToken);
-  const canReuse =
-    existingToken &&
-    !forceLocal &&
-    !needsAdsScope;
+  const canReuse = existingToken && !needsAdsScope;
 
   if (canReuse) {
     const agencyId = agency?.identityId || null;
@@ -315,13 +335,13 @@ router.get('/integrations/google/start', requireAuth, (req, res) => {
     websiteId: site.id,
     userId: req.user.id,
     mode: 'website',
-    localOnly: forceLocal,
+    localOnly: false,
     providers: list,
     scopes: scopesForProviders(list),
   });
 
   if (req.query.format === 'json') {
-    return res.json({ url, localOnly: forceLocal });
+    return res.json({ url, localOnly: false });
   }
   return res.redirect(url);
 });
@@ -446,6 +466,12 @@ router.get('/auth/google/callback', async (req, res) => {
     if (!req.user || state.userId !== req.user.id) {
       return fail('Invalid or expired OAuth state. Try Connect again.', state);
     }
+    if (state.localOnly) {
+      return fail(
+        'Client-specific Google OAuth is disabled. Connect agency Google once, then select this website’s GA4 / Search Console / Ads resources.',
+        { ...state, localOnly: false }
+      );
+    }
 
     const tokens = await exchangeCode(String(req.query.code || ''));
     if (!tokens.refresh_token) {
@@ -515,10 +541,7 @@ router.get('/auth/google/callback', async (req, res) => {
     const providers = (state.providers || GOOGLE_ANALYTICS_PROVIDERS).filter(
       (p) => GOOGLE_PROVIDERS.includes(p)
     );
-    const localOnly = Boolean(state.localOnly);
-    const authConfig = googleAuthConfigJson(
-      localOnly ? 'website' : 'agency'
-    );
+    const authConfig = googleAuthConfigJson('agency');
 
     for (const provider of providers) {
       upsertConnection({
@@ -552,16 +575,13 @@ router.get('/auth/google/callback', async (req, res) => {
       }
     }
 
-    // Per-website (client) Google must NOT replace agency portal login
-    if (!localOnly) {
-      const saved = saveAdminGoogleToken(req.user.id, encrypted, scopes, identity);
-      healGoogleWebsiteTokens(
-        encrypted,
-        req.user.id,
-        scopes,
-        saved?.data_identity_id || null
-      );
-    }
+    const saved = saveAdminGoogleToken(req.user.id, encrypted, scopes, identity);
+    healGoogleWebsiteTokens(
+      encrypted,
+      req.user.id,
+      scopes,
+      saved?.data_identity_id || null
+    );
 
     const adsOnly =
       providers.length === 1 && providers[0] === 'GOOGLE_ADS';
@@ -571,18 +591,14 @@ router.get('/auth/google/callback', async (req, res) => {
       layer: 'CLIENT',
       type: 'google.authorized',
       severity: 'info',
-      title: localOnly
-        ? 'Website Google authorized'
-        : 'Google authorized',
+      title: 'Google authorized',
       body: adsOnly
         ? `Select a Google Ads account for ${site.name}`
-        : localOnly
-          ? `This website uses its own Google login — pick GA4 / GSC for ${site.name}`
-          : `Select GA4 / Search Console for ${site.name}`,
+        : `Select GA4 / Search Console for ${site.name}`,
       href: `/integrations?website_id=${site.id}`,
     });
 
-    const qs = `${adsOnly ? '&ads=1' : ''}${localOnly ? '&local=1' : ''}`;
+    const qs = adsOnly ? '&ads=1' : '';
     return res.redirect(
       `${appBase()}/integrations?google=1&website_id=${site.id}${qs}`
     );
@@ -633,7 +649,7 @@ router.get('/integrations/google/discover', requireAuth, async (req, res) => {
 
     // Parallel fetch — do NOT bulk-enrich GA4 URLs here (50+ properties times out the UI).
     // Discover is read-only for connection tokens: no heal / apply writes on GET.
-    const [ga4Raw, gsc, adsPack] = await Promise.all([
+    const [ga4Raw, gsc, adsPack, ga4AccountsRaw] = await Promise.all([
       listGa4Properties(accessToken),
       listGscSites(accessToken),
       adsConfigured()
@@ -641,6 +657,7 @@ router.get('/integrations/google/discover', requireAuth, async (req, res) => {
             .then((ads) => ({ ads, adsError: null }))
             .catch((e) => ({ ads: [], adsError: safeError(e) }))
         : Promise.resolve({ ads: [], adsError: null }),
+      listGa4AccountGroups(accessToken, { enrichUrls: false }).catch(() => []),
     ]);
     const ga4 = ga4Raw.map((p) => ({ ...p, url: p.url || null }));
     const ads = adsPack.ads || [];
@@ -708,6 +725,21 @@ router.get('/integrations/google/discover', requireAuth, async (req, res) => {
         byExt[`GOOGLE_ADS:${normalizeCustomerId(a.id)}`] ||
         null,
     }));
+    const ga4Accounts = (ga4AccountsRaw || []).map((account) => {
+      const properties = (account.properties || []).map((p) => ({
+        ...p,
+        linked: byExt[`GOOGLE_ANALYTICS:${p.id}`] || null,
+      }));
+      const linkedCount = properties.filter((p) => p.linked).length;
+      return {
+        ...account,
+        properties,
+        linkedCount,
+        availableCount: properties.length - linkedCount,
+        fullyLinked:
+          properties.length > 0 && linkedCount === properties.length,
+      };
+    });
 
     const imported =
       ga4Out.filter((p) => p.linked).length +
@@ -730,6 +762,7 @@ router.get('/integrations/google/discover', requireAuth, async (req, res) => {
       imported,
       available,
       ga4: ga4Out,
+      ga4Accounts,
       gsc: gscOut,
       ads: adsOut,
       adsError,
@@ -750,6 +783,7 @@ router.get('/integrations/google/discover', requireAuth, async (req, res) => {
         imported: 0,
         available: 0,
         ga4: [],
+        ga4Accounts: [],
         gsc: [],
         ads: [],
         needsReauth: e.code === 'NEEDS_REAUTH',
@@ -771,6 +805,7 @@ router.get('/integrations/google/discover', requireAuth, async (req, res) => {
       imported: 0,
       available: 0,
       ga4: [],
+      ga4Accounts: [],
       gsc: [],
       ads: [],
       error: safeError(e),
@@ -820,6 +855,8 @@ router.post('/integrations/google/import', requireAuth, async (req, res) => {
       loginCustomerId: req.body.login_customer_id || '',
       alsoGscId: req.body.also_gsc_id || '',
       alsoGa4Id: req.body.also_ga4_id || '',
+      ga4AccountId:
+        req.body.ga4_account_id || req.body.account_id || '',
       notify: true,
     });
 
@@ -881,6 +918,54 @@ router.post('/integrations/google/import-bulk', requireAuth, async (req, res) =>
   } catch (e) {
     console.error(e);
     res.status(400).json({ error: safeError(e), code: e.code });
+  }
+});
+
+/**
+ * Import one GA4 account as one client with all (or selected) properties as websites.
+ * Auto-links matching GSC / strong-match Ads per website.
+ */
+router.post('/integrations/google/import-account', requireAuth, async (req, res) => {
+  try {
+    const identityId = Number(req.body.identity_id || 0) || null;
+    const { accessToken, encrypted, identityId: resolvedId } =
+      await getAccessTokenForDiscover(req.user.id, identityId);
+    const dataIdentityId = resolvedId || identityId || null;
+    const ga4AccountId = String(
+      req.body.ga4_account_id || req.body.account_id || ''
+    ).trim();
+    const propertyIds = Array.isArray(req.body.property_ids)
+      ? req.body.property_ids
+      : null;
+    const syncAfter = req.body.sync !== false;
+    const result = await importGoogleAccount({
+      userId: req.user.id,
+      accessToken,
+      encrypted,
+      dataIdentityId,
+      ga4AccountId,
+      propertyIds,
+      syncAfter,
+      notify: true,
+    });
+    const firstSite = result.websites?.[0];
+    if (result.client?.id && firstSite?.id) {
+      setSession(res, {
+        userId: req.user.id,
+        role: req.user.role,
+        selectedClientId: result.client.id,
+        selectedWebsiteId: firstSite.id,
+      });
+    }
+    res.status(result.created ? 201 : 200).json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(e.status || 400).json({
+      error: safeError(e),
+      code: e.code,
+      client_id: e.client_id,
+      website_id: e.website_id,
+    });
   }
 });
 
@@ -983,16 +1068,42 @@ router.get('/integrations/google/resources', requireAuth, async (req, res) => {
         code: 'NOT_CONNECTED',
       });
     }
+    const site = owned.site;
+    const client = getClient(site.client_id);
     const accessToken = await getAccessTokenForWebsite(websiteId, req.user.id);
-    const [ga4, gsc] = await Promise.all([
+    const [ga4Raw, gscRaw] = await Promise.all([
       listGa4Properties(accessToken),
       listGscSites(accessToken),
     ]);
+    const ga4WithUrls = await enrichGa4WithUrls(accessToken, ga4Raw).catch(
+      () => ga4Raw.map((p) => ({ ...p, url: null }))
+    );
+    const currentGa4 = getConnection(websiteId, 'GOOGLE_ANALYTICS');
+    const currentGsc = getConnection(websiteId, 'GOOGLE_SEARCH_CONSOLE');
+    const currentAds = getConnection(websiteId, 'GOOGLE_ADS');
+    const ga4 = withRecommendation(
+      ga4WithUrls,
+      site,
+      client,
+      currentGa4?.external_account_id || ''
+    );
+    const gsc = withRecommendation(
+      gscRaw.map((s) => ({ ...s, url: guessUrlFromGsc(s.id) })),
+      site,
+      client,
+      currentGsc?.external_account_id || ''
+    );
     let ads = [];
     let adsError = null;
     if (adsConfigured()) {
       try {
-        ads = await listAdsAccounts(accessToken);
+        ads = withRecommendation(
+          await listAdsAccounts(accessToken),
+          site,
+          client,
+          normalizeCustomerId(currentAds?.external_account_id || ''),
+          (row) => normalizeCustomerId(row.id)
+        );
       } catch (e) {
         adsError = safeError(e);
         if (
@@ -1018,6 +1129,189 @@ router.get('/integrations/google/resources', requireAuth, async (req, res) => {
     res.status(400).json({ error: safeError(e), code: e.code });
   }
 });
+
+async function findBestGoogleCompanion(accessToken, provider, site, client) {
+  if (provider === 'GOOGLE_ANALYTICS') {
+    const rows = (await listGscSites(accessToken)).map((s) => ({
+      ...s,
+      url: guessUrlFromGsc(s.id),
+    }));
+    return withRecommendation(rows, site, client, '').find(
+      (row) => row.recommended
+    );
+  }
+  if (provider === 'GOOGLE_SEARCH_CONSOLE') {
+    const raw = await listGa4Properties(accessToken);
+    const rows = await enrichGa4WithUrls(accessToken, raw).catch(() =>
+      raw.map((p) => ({ ...p, url: null }))
+    );
+    return withRecommendation(rows, site, client, '').find(
+      (row) => row.recommended
+    );
+  }
+  return null;
+}
+
+async function autoLinkGoogleCompanion({
+  accessToken,
+  client,
+  site,
+  provider,
+  tokenRow,
+  userId,
+  dataIdentityId,
+}) {
+  const companionProvider =
+    provider === 'GOOGLE_ANALYTICS'
+      ? 'GOOGLE_SEARCH_CONSOLE'
+      : provider === 'GOOGLE_SEARCH_CONSOLE'
+        ? 'GOOGLE_ANALYTICS'
+        : null;
+  if (!companionProvider) return null;
+
+  const current = getConnection(site.id, companionProvider);
+  if (current?.status === 'ACTIVE' && current.external_account_id) {
+    return null;
+  }
+
+  try {
+    const match = await findBestGoogleCompanion(
+      accessToken,
+      provider,
+      site,
+      client
+    );
+    if (!match?.id) return null;
+    upsertConnection({
+      clientId: site.client_id,
+      websiteId: site.id,
+      provider: companionProvider,
+      status: 'PENDING_SELECT',
+      encryptedRefreshToken: tokenRow.encrypted_refresh_token,
+      scopesJson: tokenRow.scopes_json,
+      externalAccountId: match.id,
+      externalAccountName: match.name || match.id,
+      connectedByUserId: userId,
+      dataIdentityId:
+        dataIdentityId || tokenRow.data_identity_id || null,
+      lastError: null,
+    });
+    await probeAndActivate(site.id, companionProvider, accessToken);
+    return publicConnection(getConnection(site.id, companionProvider));
+  } catch (e) {
+    console.error('autoLinkGoogleCompanion soft-fail', e.message);
+    return { ok: false, error: safeError(e), provider: companionProvider };
+  }
+}
+
+async function refreshWebsiteGoogleAccess(websiteId, userId) {
+  const site = getWebsite(websiteId);
+  if (!site) return { linked: [], failed: [{ error: 'Website not found' }] };
+  applyAgencyGoogleToWebsite(websiteId, userId);
+  const tokenRow = findGoogleTokenConnection(websiteId);
+  const agency = findAnyGoogleEncryptedToken(userId);
+  if (!tokenRow && !agency) {
+    return {
+      linked: [],
+      failed: [
+        {
+          provider: 'GOOGLE',
+          error: 'Connect agency Google once under Integrations.',
+        },
+      ],
+    };
+  }
+
+  const accessToken = await getAccessTokenForWebsite(websiteId, userId);
+  const client = getClient(site.client_id);
+  const linked = [];
+  const failed = [];
+
+  async function maybeLink(provider, match) {
+    if (!match?.id) return;
+    const current = getConnection(websiteId, provider);
+    if (current?.status === 'ACTIVE' && current.external_account_id) return;
+    try {
+      upsertConnection({
+        clientId: site.client_id,
+        websiteId,
+        provider,
+        status: 'PENDING_SELECT',
+        encryptedRefreshToken:
+          tokenRow?.encrypted_refresh_token || agency?.encrypted || null,
+        scopesJson: tokenRow?.scopes_json || getAdminGoogleToken(userId)?.scopes_json || '[]',
+        externalAccountId:
+          provider === 'GOOGLE_ADS'
+            ? normalizeCustomerId(match.id)
+            : match.id,
+        externalAccountName: match.name || match.id,
+        loginCustomerId:
+          provider === 'GOOGLE_ADS'
+            ? match.loginCustomerId || normalizeCustomerId(match.id)
+            : undefined,
+        connectedByUserId: userId,
+        dataIdentityId:
+          tokenRow?.data_identity_id || agency?.identityId || null,
+        lastError: null,
+      });
+      await probeAndActivate(websiteId, provider, accessToken);
+      linked.push({
+        provider,
+        account: match.name || match.id,
+      });
+    } catch (e) {
+      failed.push({
+        provider,
+        error: safeError(e),
+      });
+    }
+  }
+
+  try {
+    const gscRows = (await listGscSites(accessToken)).map((s) => ({
+      ...s,
+      url: guessUrlFromGsc(s.id),
+    }));
+    await maybeLink(
+      'GOOGLE_SEARCH_CONSOLE',
+      withRecommendation(gscRows, site, client, '').find((row) => row.recommended)
+    );
+  } catch (e) {
+    failed.push({ provider: 'GOOGLE_SEARCH_CONSOLE', error: safeError(e) });
+  }
+
+  try {
+    const ga4Raw = await listGa4Properties(accessToken);
+    const ga4Rows = await enrichGa4WithUrls(accessToken, ga4Raw).catch(() =>
+      ga4Raw.map((p) => ({ ...p, url: null }))
+    );
+    await maybeLink(
+      'GOOGLE_ANALYTICS',
+      withRecommendation(ga4Rows, site, client, '').find((row) => row.recommended)
+    );
+  } catch (e) {
+    failed.push({ provider: 'GOOGLE_ANALYTICS', error: safeError(e) });
+  }
+
+  if (adsConfigured()) {
+    try {
+      await maybeLink(
+        'GOOGLE_ADS',
+        withRecommendation(
+          await listAdsAccounts(accessToken),
+          site,
+          client,
+          '',
+          (row) => normalizeCustomerId(row.id)
+        ).find((row) => row.recommended)
+      );
+    } catch (e) {
+      failed.push({ provider: 'GOOGLE_ADS', error: safeError(e) });
+    }
+  }
+
+  return { linked, failed };
+}
 
 router.post('/integrations/google/select', requireAuth, async (req, res) => {
   try {
@@ -1101,11 +1395,20 @@ router.post('/integrations/google/select', requireAuth, async (req, res) => {
 
     const accessToken = await getAccessTokenForWebsite(websiteId, req.user.id);
     await probeAndActivate(websiteId, provider, accessToken);
+    const companion = await autoLinkGoogleCompanion({
+      accessToken,
+      client: getClient(site.client_id),
+      site,
+      provider,
+      tokenRow,
+      userId: req.user.id,
+      dataIdentityId,
+    });
 
     let syncResult = null;
     if (syncAfter) {
       try {
-        syncResult = await syncProvider(websiteId, provider);
+        syncResult = await syncAvailableGoogleProviders(websiteId);
       } catch (syncErr) {
         console.error(syncErr);
         syncResult = { ok: false, error: safeError(syncErr) };
@@ -1126,7 +1429,70 @@ router.post('/integrations/google/select', requireAuth, async (req, res) => {
     res.json({
       ok: true,
       connection: publicConnection(getConnection(websiteId, provider)),
+      companion,
       sync: syncResult,
+      platforms: platformsForUser(websiteId, req.user.id),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({ error: safeError(e), code: e.code });
+  }
+});
+
+router.post('/integrations/sync-now', requireAuth, async (req, res) => {
+  try {
+    const owned = resolveOwnedWebsite(
+      req,
+      req.body.website_id || req.selectedWebsite?.id
+    );
+    if (owned.error) {
+      return res
+        .status(owned.status)
+        .json({ error: owned.error, code: owned.code });
+    }
+    const websiteId = owned.site.id;
+    const refreshed = await refreshWebsiteGoogleAccess(
+      websiteId,
+      req.user.id
+    );
+    const google = await syncAvailableGoogleProviders(websiteId);
+    const synced = [...(google.synced || [])];
+    const failed = [
+      ...(refreshed.failed || []),
+      ...(google.failed || []),
+    ];
+    const skipped = [];
+
+    const metaConn = getConnection(websiteId, 'META_ADS');
+    if (metaConn?.status === 'ACTIVE' && metaConn.external_account_id) {
+      try {
+        const result = await syncProvider(websiteId, 'META_ADS');
+        synced.push({
+          provider: 'META_ADS',
+          days: result.days,
+          from: result.from,
+          to: result.to,
+        });
+      } catch (e) {
+        failed.push({
+          provider: 'META_ADS',
+          error: safeError(e),
+          code: e.code || null,
+        });
+      }
+    } else {
+      skipped.push({
+        provider: 'META_ADS',
+        reason: metaConn ? String(metaConn.status).toLowerCase() : 'missing',
+      });
+    }
+
+    res.json({
+      ok: failed.length === 0,
+      refreshed,
+      synced,
+      failed,
+      skipped,
       platforms: platformsForUser(websiteId, req.user.id),
     });
   } catch (e) {
@@ -1193,7 +1559,11 @@ router.post('/integrations/:provider/sync', requireAuth, async (req, res) => {
     ) {
       return res.status(400).json({ error: 'Unsupported provider' });
     }
-    const result = await syncProvider(websiteId, provider);
+    const result = await syncProvider(websiteId, provider, {
+      from: req.body.from || undefined,
+      to: req.body.to || undefined,
+      preset: req.body.preset || undefined,
+    });
     res.json({
       ...result,
       platforms: platformsForUser(websiteId, req.user.id),

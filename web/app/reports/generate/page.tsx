@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdminShell, { PageHeader } from "../../components/admin-shell";
 import { api } from "../../../lib/api";
@@ -13,9 +13,7 @@ import {
 } from "../../../lib/report-sections";
 import {
   REPORT_KPI_DEFS,
-  defaultChartTypes,
   kpisForEnabledSections,
-  type ChartType,
 } from "../../../lib/report-kpis";
 import {
   DEFAULT_PRESETS,
@@ -24,10 +22,19 @@ import {
 
 export default function GenerateReportPage() {
   const router = useRouter();
-  const { clients, selectedClient, selectedWebsite, selectClient } =
-    useSession();
+  const {
+    clients,
+    websites,
+    selectedClient,
+    selectedWebsite,
+    selectClient,
+    selectWebsite,
+  } = useSession();
   const [clientId, setClientId] = useState(
     String(selectedClient?.id || clients[0]?.id || "")
+  );
+  const [websiteId, setWebsiteId] = useState(
+    String(selectedWebsite?.id || "")
   );
   const [title, setTitle] = useState(
     selectedClient
@@ -39,17 +46,46 @@ export default function GenerateReportPage() {
   const [to, setTo] = useState("");
   const [useOverviewDefaults, setUseOverviewDefaults] = useState(true);
   const [sections, setSections] = useState<SectionsMap>(defaultSectionsMap());
-  const [chartTypes, setChartTypes] = useState<Record<string, ChartType>>(
-    defaultChartTypes()
-  );
   const [busy, setBusy] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (selectedClient?.id != null) {
+      const t = window.setTimeout(
+        () => setClientId(String(selectedClient.id)),
+        0
+      );
+      return () => window.clearTimeout(t);
+    }
+  }, [selectedClient?.id]);
+
+  useEffect(() => {
+    const t = window.setTimeout(
+      () => setWebsiteId(String(selectedWebsite?.id || "")),
+      0
+    );
+    return () => window.clearTimeout(t);
+  }, [selectedWebsite?.id]);
+
+  const clientWebsites = useMemo(() => {
+    if (!clientId) return [];
+    if (String(selectedClient?.id) === clientId) return websites;
+    return [];
+  }, [clientId, selectedClient?.id, websites]);
 
   const previewName = useMemo(() => {
     const c = clients.find((x) => String(x.id) === clientId);
     const raw = c?.name || selectedClient?.name || "Client";
     return raw.split(/\s+[—–-]\s+/)[0] || raw;
   }, [clients, clientId, selectedClient]);
+
+  const previewWebsite = useMemo(() => {
+    const fromList = clientWebsites.find((w) => String(w.id) === websiteId);
+    if (fromList) return fromList;
+    if (String(selectedWebsite?.id) === websiteId) return selectedWebsite;
+    return null;
+  }, [clientWebsites, websiteId, selectedWebsite]);
 
   const resolved = useMemo(
     () => previewResolveRange(preset, from, to),
@@ -65,6 +101,47 @@ export default function GenerateReportPage() {
     [activeSections]
   );
 
+  async function onClientChange(nextId: string) {
+    setClientId(nextId);
+    setError("");
+    const c = clients.find((x) => String(x.id) === nextId);
+    if (c) {
+      const short = c.name.split(/\s+[—–-]\s+/)[0] || c.name;
+      setTitle(`${short} SEO report`);
+    }
+    if (!nextId) {
+      setWebsiteId("");
+      return;
+    }
+    setSwitching(true);
+    try {
+      const session = await selectClient(Number(nextId));
+      setWebsiteId(String(session.selectedWebsite?.id || ""));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not switch client"
+      );
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  async function onWebsiteChange(nextId: string) {
+    setWebsiteId(nextId);
+    setError("");
+    if (!nextId) return;
+    setSwitching(true);
+    try {
+      await selectWebsite(Number(nextId));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not switch website"
+      );
+    } finally {
+      setSwitching(false);
+    }
+  }
+
   function toggleSection(id: string) {
     const def = REPORT_SECTIONS.find((s) => s.id === id);
     if (def?.required) return;
@@ -77,6 +154,10 @@ export default function GenerateReportPage() {
       setError("Select a client");
       return;
     }
+    if (!websiteId) {
+      setError("Select a website");
+      return;
+    }
     if (preset === "custom" && (!from || !to)) {
       setError("Pick From and To for a custom period");
       return;
@@ -84,7 +165,12 @@ export default function GenerateReportPage() {
     setBusy(true);
     setError("");
     try {
-      await selectClient(Number(clientId));
+      if (String(selectedClient?.id) !== clientId) {
+        await selectClient(Number(clientId));
+      }
+      if (String(selectedWebsite?.id) !== websiteId) {
+        await selectWebsite(Number(websiteId));
+      }
       const data = await api<{ report: { id: number } }>("/reports", {
         method: "POST",
         body: JSON.stringify({
@@ -94,7 +180,6 @@ export default function GenerateReportPage() {
           to: preset === "custom" ? to : undefined,
           use_overview_defaults: useOverviewDefaults,
           sections: activeSections,
-          chart_types: chartTypes,
         }),
       });
       router.push(`/reports/${data.report.id}`);
@@ -120,12 +205,12 @@ export default function GenerateReportPage() {
             </Link>
           }
         />
-        {!selectedWebsite && clientId && (
+        {!websiteId && clientId ? (
           <div className="banner-error" style={{ marginBottom: 12 }}>
-            This client needs a website selected in the top bar after you pick
-            them.
+            This client has no website yet. Add one from Clients, then return
+            here.
           </div>
-        )}
+        ) : null}
         {error && <div className="banner-error">{error}</div>}
         <div className="report-builder">
           <form className="panel form-panel" onSubmit={onSubmit}>
@@ -137,16 +222,9 @@ export default function GenerateReportPage() {
                   <select
                     required
                     value={clientId}
+                    disabled={switching || busy}
                     onChange={(e) => {
-                      setClientId(e.target.value);
-                      const c = clients.find(
-                        (x) => String(x.id) === e.target.value
-                      );
-                      if (c) {
-                        const short =
-                          c.name.split(/\s+[—–-]\s+/)[0] || c.name;
-                        setTitle(`${short} SEO report`);
-                      }
+                      onClientChange(e.target.value).catch(() => undefined);
                     }}
                   >
                     <option value="">Select…</option>
@@ -155,6 +233,31 @@ export default function GenerateReportPage() {
                         {c.name}
                       </option>
                     ))}
+                  </select>
+                </label>
+                <label>
+                  Website
+                  <select
+                    required
+                    value={websiteId}
+                    disabled={
+                      switching || busy || !clientId || clientWebsites.length === 0
+                    }
+                    onChange={(e) => {
+                      onWebsiteChange(e.target.value).catch(() => undefined);
+                    }}
+                  >
+                    {clientWebsites.length === 0 ? (
+                      <option value="">
+                        {clientId ? "No websites" : "Select a client…"}
+                      </option>
+                    ) : (
+                      clientWebsites.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.url || w.name}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </label>
                 <label>
@@ -268,42 +371,32 @@ export default function GenerateReportPage() {
             ) : null}
 
             <div className="form-section" style={{ marginTop: 22 }}>
-              <h2>Chart type for each KPI</h2>
+              <h2>Report KPI matrix</h2>
               <p className="muted">
-                Every metric below gets a scorecard and a chart in the PDF.
-                Change the chart style per KPI.
+                Reports use the modern reference chart style automatically. Each
+                enabled KPI gets one fixed, best-fit chart based on the metric.
               </p>
-              <div className="report-chart-type-grid">
+              <div className="report-chart-matrix">
                 {chartKpis.map((k) => (
-                  <label key={k.key} className="report-chart-type-row">
+                  <div key={k.key} className="report-chart-matrix-row">
                     <span>
                       <strong>{k.label}</strong>
                       <small>
                         {REPORT_SECTIONS.find((s) => s.id === k.section)?.label}
                       </small>
                     </span>
-                    <select
-                      value={chartTypes[k.key] || k.defaultChart}
-                      onChange={(e) =>
-                        setChartTypes((prev) => ({
-                          ...prev,
-                          [k.key]: e.target.value as ChartType,
-                        }))
-                      }
-                    >
-                      {k.charts.map((c) => (
-                        <option key={c} value={c}>
-                          {c.charAt(0).toUpperCase() + c.slice(1)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <span className={`chart-style-pill chart-${k.defaultChart}`}>
+                      {k.defaultChart.charAt(0).toUpperCase() +
+                        k.defaultChart.slice(1)}
+                    </span>
+                  </div>
                 ))}
                 {!chartKpis.length ? (
-                  <p className="muted">Enable a data section to configure charts.</p>
+                  <p className="muted">Enable a data section to include KPI charts.</p>
                 ) : null}
               </div>
             </div>
+
 
             <div className="form-footer">
               <Link className="secondary-button" href="/reports">
@@ -321,7 +414,7 @@ export default function GenerateReportPage() {
               <small>SEO PERFORMANCE REPORT</small>
               <h2>{previewName}</h2>
               <p>
-                {selectedWebsite?.url || "Select client / website"} ·{" "}
+                {previewWebsite?.url || "Select client / website"} ·{" "}
                 {resolved.label}
               </p>
               <p className="muted" style={{ fontSize: 10 }}>

@@ -228,3 +228,13 @@ CREATE TABLE IF NOT EXISTS user_domain_access (
   UNIQUE (user_id, primary_domain)
 );
 
+CREATE TABLE IF NOT EXISTS website_gsc_keywords (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  website_id INTEGER NOT NULL REFERENCES websites(id) ON DELETE CASCADE,
+  query TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'custom'
+    CHECK (kind IN ('custom', 'hidden')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (website_id, query)
+);
+

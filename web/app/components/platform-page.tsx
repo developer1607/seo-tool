@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import AdminShell, { PageHeader } from "./admin-shell";
 import AccessRevokedBanner from "./access-revoked-banner";
 import DateRangeBar from "./date-range-bar";
@@ -38,6 +38,9 @@ type PlatformPayload = {
     hint?: string;
   } | null;
   rows: Array<Record<string, unknown>>;
+  compareRows?: Array<Record<string, unknown>>;
+  keywordRows?: Array<Record<string, unknown>>;
+  trackedKeywords?: string[];
 };
 
 type Col = {
@@ -83,6 +86,7 @@ const META: Record<
       "spend",
       "clicks",
       "impressions",
+      "reach",
       "ctr",
       "cpc",
       "cpm",
@@ -94,6 +98,7 @@ const META: Record<
       { key: "spend", label: "Spend", format: "money" },
       { key: "clicks", label: "Clicks", format: "int" },
       { key: "impressions", label: "Impr.", format: "int" },
+      { key: "reach", label: "Reach", format: "int" },
       { key: "ctr", label: "CTR", format: "pct" },
       { key: "cpc", label: "CPC", format: "money" },
       { key: "cpm", label: "CPM", format: "money" },
@@ -138,6 +143,7 @@ const METRIC_LABELS: Record<string, string> = {
   spend: "Spend",
   clicks: "Clicks",
   impressions: "Impressions",
+  reach: "Reach",
   ctr: "CTR",
   cpc: "CPC",
   cpm: "CPM",
@@ -152,6 +158,14 @@ const METRIC_LABELS: Record<string, string> = {
   avg_position: "Avg position",
   days: "Days with data",
 };
+
+const GSC_KEYWORD_COLUMNS: Col[] = [
+  { key: "query", label: "Keyword" },
+  { key: "clicks", label: "Clicks", format: "int" },
+  { key: "impressions", label: "Impr.", format: "int" },
+  { key: "ctr", label: "CTR", format: "pct" },
+  { key: "avg_position", label: "Position", format: "pos" },
+];
 
 function formatMetric(key: string, value: number | null | undefined) {
   if (value == null || Number.isNaN(Number(value))) return "—";
@@ -171,7 +185,6 @@ function cellValue(row: Record<string, unknown>, col: Col) {
   const clicks = Number(row.clicks) || 0;
   const impressions = Number(row.impressions) || 0;
   const spend = Number(row.spend) || 0;
-  const conversions = Number(row.primary_conversions) || 0;
   const sessions = Number(row.sessions) || 0;
   const engaged = Number(row.engaged_sessions) || 0;
   const value = Number(row.primary_value) || 0;
@@ -200,6 +213,16 @@ function cellValue(row: Record<string, unknown>, col: Col) {
   return String(Math.round(n));
 }
 
+function keywordCellValue(row: Record<string, unknown>, col: Col) {
+  if (col.key === "query") return String(row.query || "");
+  return cellValue(row, col);
+}
+
+function statusLabel(status: string) {
+  if (status === "ACCESS_NOT_GIVEN") return "ACCESS NOT GIVEN";
+  return status.replace(/_/g, " ");
+}
+
 export default function PlatformPage({
   platformKey,
 }: {
@@ -207,13 +230,16 @@ export default function PlatformPage({
 }) {
   const meta = META[platformKey];
   const { selectedClient, selectedWebsite, dateRange } = useSession();
+  const selectedWebsiteId = selectedWebsite?.id;
   const [data, setData] = useState<PlatformPayload | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [keywordInput, setKeywordInput] = useState("");
+  const [keywordBusy, setKeywordBusy] = useState(false);
+  const [keywordError, setKeywordError] = useState("");
 
   useEffect(() => {
-    if (!meta || !selectedWebsite) {
-      setData(null);
+    if (!meta || !selectedWebsiteId) {
       return;
     }
     let cancelled = false;
@@ -242,7 +268,7 @@ export default function PlatformPage({
       cancelled = true;
       window.removeEventListener("webastral:synced", onSynced);
     };
-  }, [meta, platformKey, selectedWebsite?.id, dateRange]);
+  }, [meta, platformKey, selectedWebsiteId, dateRange]);
 
   const softFail =
     data?.status?.status === "ERROR" ||
@@ -276,7 +302,67 @@ export default function PlatformPage({
     });
   }, [meta, data, platformKey]);
 
-  const colCount = meta?.columns.length || 5;
+  async function addKeyword(e: FormEvent) {
+    e.preventDefault();
+    const query = keywordInput.trim();
+    if (!query || keywordBusy) return;
+    setKeywordBusy(true);
+    setKeywordError("");
+    try {
+      const res = await api<{
+        keywordRows: Array<Record<string, unknown>>;
+        trackedKeywords: string[];
+      }>(`/platforms/gsc/keywords?${rangeQuery(dateRange)}`, {
+        method: "POST",
+        body: JSON.stringify({ query }),
+      });
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              keywordRows: res.keywordRows,
+              trackedKeywords: res.trackedKeywords,
+            }
+          : prev
+      );
+      setKeywordInput("");
+    } catch (err) {
+      setKeywordError((err as Error).message || "Could not add keyword");
+    } finally {
+      setKeywordBusy(false);
+    }
+  }
+
+  async function removeKeyword(query: string) {
+    if (!query || keywordBusy) return;
+    setKeywordBusy(true);
+    setKeywordError("");
+    try {
+      const res = await api<{
+        keywordRows: Array<Record<string, unknown>>;
+        trackedKeywords: string[];
+      }>(
+        `/platforms/gsc/keywords?${rangeQuery(dateRange)}&query=${encodeURIComponent(query)}`,
+        {
+          method: "DELETE",
+          body: JSON.stringify({ query }),
+        }
+      );
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              keywordRows: res.keywordRows,
+              trackedKeywords: res.trackedKeywords,
+            }
+          : prev
+      );
+    } catch (err) {
+      setKeywordError((err as Error).message || "Could not remove keyword");
+    } finally {
+      setKeywordBusy(false);
+    }
+  }
 
   if (!meta) {
     return (
@@ -290,7 +376,7 @@ export default function PlatformPage({
 
   return (
     <AdminShell title={meta.title}>
-      <div className="page-content">
+      <div className="page-content aa-page">
         <PageHeader
           eyebrow="CHANNEL"
           title={meta.title}
@@ -333,8 +419,8 @@ export default function PlatformPage({
           </section>
         ) : (
           <>
-            <section className="panel" style={{ marginBottom: 16 }}>
-              <div className="list-summary">
+            <article className="aa-card" style={{ marginBottom: 14 }}>
+              <div className="list-summary" style={{ padding: 0 }}>
                 <strong>
                   <span
                     className={`status ${
@@ -343,10 +429,7 @@ export default function PlatformPage({
                         : "attention"
                     }`}
                   >
-                    {(data?.status?.status || "NOT_STARTED").replace(
-                      /_/g,
-                      " "
-                    )}
+                    {statusLabel(data?.status?.status || "NOT_STARTED")}
                   </span>
                   {" · "}
                   {data?.status?.account_name || meta.title}
@@ -361,7 +444,7 @@ export default function PlatformPage({
                 data.status.status === "NOT_STARTED" ||
                 data.status.status === "DISCONNECTED" ||
                 data.status.status === "COMING_SOON") && (
-                <div style={{ padding: "0 4px 12px" }}>
+                <div style={{ paddingTop: 12 }}>
                   {data?.status?.status === "COMING_SOON" ? (
                     <p className="muted" style={{ margin: 0 }}>
                       {data?.status?.hint ||
@@ -383,7 +466,7 @@ export default function PlatformPage({
                   )}
                 </div>
               )}
-            </section>
+            </article>
 
             {softFail && (
               <div className="banner-error" style={{ marginBottom: 16 }}>
@@ -404,91 +487,221 @@ export default function PlatformPage({
               />
             ) : null}
 
-            <section className="metric-grid metric-grid-dense">
+            <div
+              className="aa-kpi-strip"
+              style={{
+                gridTemplateColumns: `repeat(${Math.min(metrics.length, 5)}, minmax(0, 1fr))`,
+              }}
+            >
               {metrics.map((m) => (
-                <article className="metric-card blue" key={m.key}>
-                  <div className="metric-top">
-                    <span>{m.label}</span>
-                  </div>
+                <article className="aa-card aa-card-mini" key={m.key}>
+                  <span className="aa-card-title">{m.label}</span>
                   <strong>{loading && !data ? "…" : m.value}</strong>
-                  <div className="metric-bottom">
+                  <div className="aa-mini-trend">
                     {m.key === "days" ? (
-                      <span>in range</span>
+                      <span className="muted">in range</span>
                     ) : (
                       <>
                         <TrendBadge cur={m.cur} prev={m.prev} />
-                        <span>vs prior</span>
+                        <span className="muted"> vs prior</span>
                       </>
                     )}
                   </div>
                 </article>
               ))}
-            </section>
+            </div>
 
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 14 }}>
               {!data?.rows?.length ? (
-                <section className="panel">
-                  <div className="panel-header">
-                    <div>
-                      <h2>Charts</h2>
-                      <p className="muted">Interactive trends for this channel</p>
-                    </div>
-                  </div>
-                  <div className="empty-section left-aligned">
-                    <p>
-                      {data?.status?.status === "ACTIVE"
-                        ? "ACTIVE but no snapshot rows for this date range — Sync under Integrations or widen the range."
-                        : "No rows yet. Connect and sync under Integrations."}
-                    </p>
-                  </div>
-                </section>
+                <article className="aa-card">
+                  <header className="aa-card-head">
+                    <span className="aa-card-icon">▮</span>
+                    <span className="aa-card-title">Charts</span>
+                  </header>
+                  <p className="aa-empty" style={{ padding: "28px 8px" }}>
+                    {data?.status?.status === "ACTIVE"
+                      ? "ACTIVE but no snapshot rows for this date range — Sync under Integrations or widen the range."
+                      : "No rows yet. Connect and sync under Integrations."}
+                  </p>
+                </article>
               ) : (
                 <PlatformCharts
                   platformKey={platformKey}
                   rows={data.rows}
+                  compareRows={data.compareRows || []}
+                  thisLabel={
+                    data.range.preset === "last_7" ? "This week" : "This period"
+                  }
+                  priorLabel={
+                    data.range.preset === "last_7" ? "Last week" : "Prior period"
+                  }
                 />
               )}
             </div>
 
-            <section className="panel">
-              <div className="panel-header">
-                <div>
-                  <h2>Daily breakdown</h2>
-                  <p className="muted">
-                    All synced {meta.title} fields for this range
-                  </p>
-                </div>
-              </div>
+            <article className="aa-card aa-card-table">
+              <header className="aa-card-head">
+                <span className="aa-card-icon">▮</span>
+                <span className="aa-card-title">Daily breakdown</span>
+                <span className="aa-card-meta">
+                  {meta.title} · this range
+                </span>
+              </header>
               {!data?.rows?.length ? (
-                <p className="muted">No snapshot rows for this range.</p>
+                <p className="aa-empty" style={{ padding: "20px 8px" }}>
+                  No snapshot rows for this range.
+                </p>
               ) : (
-                <div className="project-table platform-daily-table">
-                  <div
-                    className="table-heading platform-table-head"
-                    style={{
-                      gridTemplateColumns: `repeat(${colCount}, minmax(72px, 1fr))`,
-                    }}
-                  >
-                    {meta.columns.map((c) => (
-                      <span key={c.key}>{c.label}</span>
-                    ))}
-                  </div>
-                  {data.rows.map((row) => (
-                    <div
-                      className="project-row platform-table-row"
-                      key={String(row.date)}
-                      style={{
-                        gridTemplateColumns: `repeat(${colCount}, minmax(72px, 1fr))`,
-                      }}
-                    >
-                      {meta.columns.map((c) => (
-                        <span key={c.key}>{cellValue(row, c)}</span>
+                <div className="aa-table-scroll">
+                  <table className="aa-table">
+                    <thead>
+                      <tr>
+                        {meta.columns.map((c) => (
+                          <th key={c.key}>{c.label}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.rows.map((row) => (
+                        <tr key={String(row.date)}>
+                          {meta.columns.map((c) => (
+                            <td key={c.key}>{cellValue(row, c)}</td>
+                          ))}
+                        </tr>
                       ))}
-                    </div>
-                  ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-            </section>
+            </article>
+
+            {platformKey === "gsc" && (
+              <article className="aa-card aa-card-table" style={{ marginTop: 14 }}>
+                <header className="aa-card-head">
+                  <span className="aa-card-icon">▮</span>
+                  <span className="aa-card-title">Top keywords</span>
+                  <span className="aa-card-meta">
+                    Top queries + tracked custom
+                  </span>
+                </header>
+
+                <form className="gsc-keyword-form" onSubmit={addKeyword}>
+                  <label className="gsc-keyword-field">
+                    <span>Track custom keyword</span>
+                    <input
+                      type="text"
+                      value={keywordInput}
+                      onChange={(e) => setKeywordInput(e.target.value)}
+                      placeholder="e.g. best seo agency delhi"
+                      maxLength={200}
+                      disabled={keywordBusy}
+                    />
+                  </label>
+                  <button
+                    className="primary-button"
+                    type="submit"
+                    disabled={keywordBusy || !keywordInput.trim()}
+                  >
+                    {keywordBusy ? "Saving…" : "Add keyword"}
+                  </button>
+                </form>
+                {keywordError ? (
+                  <p className="error-text gsc-keyword-error">{keywordError}</p>
+                ) : null}
+                <p className="muted gsc-keyword-hint">
+                  Custom keywords stay tracked when they leave the top list. Sync
+                  to refresh metrics.
+                </p>
+
+                {!data?.keywordRows?.length ? (
+                  <p className="aa-empty" style={{ padding: "16px 8px" }}>
+                    No keyword rows yet. Sync Search Console or add a custom
+                    keyword above.
+                  </p>
+                ) : (
+                  <div className="aa-table-scroll">
+                    <table className="aa-table">
+                      <thead>
+                        <tr>
+                          {GSC_KEYWORD_COLUMNS.map((c) => (
+                            <th key={c.key}>{c.label}</th>
+                          ))}
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.keywordRows.map((row) => {
+                          const query = String(row.query || "");
+                          const origin = String(row.origin || "auto");
+                          return (
+                            <tr key={`${origin}:${query}`}>
+                              {GSC_KEYWORD_COLUMNS.map((c) => (
+                                <td key={c.key}>
+                                  {c.key === "query" ? (
+                                    <>
+                                      {keywordCellValue(row, c)}
+                                      {origin === "custom" ? (
+                                        <em className="aa-tag">Tracked</em>
+                                      ) : null}
+                                    </>
+                                  ) : (
+                                    keywordCellValue(row, c)
+                                  )}
+                                </td>
+                              ))}
+                              <td>
+                                <button
+                                  type="button"
+                                  className="secondary-button gsc-keyword-remove"
+                                  disabled={keywordBusy}
+                                  onClick={() => removeKeyword(query)}
+                                >
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <div className="aa-chart-meta">
+                  <div className="aa-rank-legend">
+                    <span>
+                      <i style={{ background: "#1f9d55" }} />
+                      1-3
+                    </span>
+                    <span>
+                      <i style={{ background: "#7dcc6a" }} />
+                      4-10
+                    </span>
+                    <span>
+                      <i style={{ background: "#f0c419" }} />
+                      11-20
+                    </span>
+                    <span>
+                      <i style={{ background: "#f08a24" }} />
+                      21-50
+                    </span>
+                    <span>
+                      <i style={{ background: "#e24c3b" }} />
+                      51+
+                    </span>
+                  </div>
+                  <ul className="aa-chart-explain">
+                    <li>
+                      <strong>Position</strong> — average Google ranking for
+                      that query (bands above match the Overview rankings chart)
+                    </li>
+                    <li>
+                      <strong>Tracked</strong> — custom keywords you pinned;
+                      others are top auto queries
+                    </li>
+                  </ul>
+                </div>
+              </article>
+            )}
           </>
         )}
       </div>

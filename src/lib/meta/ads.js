@@ -67,7 +67,7 @@ function num(v) {
 async function fetchMetaDaily(accessToken, adAccountId, from, to) {
   const id = normalizeActId(adAccountId);
   const data = await graphGet(`/${id}/insights`, accessToken, {
-    fields: 'spend,impressions,clicks,ctr,actions,date_start',
+    fields: 'spend,impressions,clicks,ctr,reach,cpc,cpm,actions,date_start',
     time_increment: '1',
     time_range: JSON.stringify({ since: from, until: to }),
     level: 'account',
@@ -95,7 +95,15 @@ async function fetchMetaDaily(accessToken, adAccountId, from, to) {
       impressions: num(r.impressions),
       clicks: num(r.clicks),
       ctr: num(r.ctr) / (String(r.ctr).includes('%') ? 100 : 1),
+      reach: num(r.reach),
+      cpc: num(r.cpc),
+      cpm: num(r.cpm),
       primary_conversions: conversions,
+      payload: {
+        actions: r.actions || [],
+        date_start: r.date_start,
+        date_stop: r.date_stop || null,
+      },
     });
   }
   return rows;

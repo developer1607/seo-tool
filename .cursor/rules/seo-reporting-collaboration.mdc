@@ -43,7 +43,54 @@ docs/03-qa/01-alpha
 docs/04-audits-archive/01-handoffs|02-portal-audits|03-research
 ```
 
+## Context / token discipline (from generic cursor pack)
+
+- Prefer smallest useful context: `Engineering.md` / this rule / task docs → only the relevant source → related docs
+- Do **not** auto-load whole repo, whole git history, whole `DEV_LOGBOOK.md`, or unrelated dirs
+- Integrations task → Google/Meta libs + integrations UI only; reports → report code only
+- Docs: record **decisions**, not dialogue dumps
+
+## Access → Client → Website (Looker-parity mental model)
+
+Client grants **agency Gmail** access to GA4 / GSC / Ads. Webastral does **not** import “access files”; it OAuth-connects that Gmail, syncs inventory, then maps assets:
+
+| Looker Studio | Webastral |
+|---------------|-----------|
+| Log in with agency Gmail | **Connect Google** (data identity) on `/integrations` |
+| GA4 Account → Property | **Client** ← Analytics account; **Website** ← each GA4 property |
+| GSC Site | Same **Website** (matched by hostname / companion import) |
+| Google Ads Account | **Link to existing Website** (never auto-creates client) |
+| One report page per site | Top-bar **Client + Website**; charts read that website’s snapshots |
+| Multi-site = pages or dropdown | Multi-property GA4 account = **one Client, many Websites**; switcher = dropdown |
+
+Rules locked in:
+
+1. Access = invite agency Gmail → Connect Google → Sync inventory → Import/Link
+2. **1 website** → 1 Client + 1 Website; wire GA4 + GSC (+ Ads link)
+3. **2+ websites same Analytics account** → 1 Client, N Websites (never 1 client per property)
+4. Ads always **link to website** after Client/Website exist
+5. Dashboard data is **website-scoped** snapshots (not live Looker blend); Overview can roll up Client
+6. Do not mix two unrelated sites into one chart series
+
 ## Working instinct log
+
+- **2026-09-25** — Google Rankings empty was usually Recharts `height:100%` collapse (not missing data). Chart uses fixed 220px height; series includes `avg_position` fallback. Platforms + saved reports use same `.aa-card` / blue-green AA palette.
+
+- **2026-09-25** — SEO Overview visual target = AgencyAnalytics **card grid** (stacked rankings chart + 2×2 tiles + Visibility + 4 gauges), not a long document. Ref: `docs/design-mocks/ref-shots/aa-seo-dashboard-grid.png`. Component: `web/app/components/seo-aa-dashboard.tsx`.
+
+- **2026-09-25** — SEO report UI reference = AgencyAnalytics template (`docs/design-mocks/refrence-report-ui.html` + example shots in `docs/design-mocks/ref-shots/`). Fill with GSC/GA4/Ads/Meta. Keywords = GSC queries (default on), not Phase 3 rank tracker.
+
+- **2026-09-25** — GSC keywords: auto **top 10** only; custom tracked via `website_gsc_keywords` (add/remove). Remove on auto = hide; custom = delete. Sync fetches custom query metrics via GSC filters.
+
+- **2026-09-25** — Product mental model = Looker Studio parity: Gmail access → inventory → Client/Website mapping (table above). Not file import. Token discipline from generic cursor pack applies.
+
+- **2026-09-24** — Same GA4 Analytics account = one client, many websites. UI prefers **Import client with all websites**; hide per-row import on fresh multi-property accounts. Never create a new client per property when a sibling is already imported.
+
+- **2026-09-24** — GA4 “No web stream URL” is not a schema problem. Import-all must fall back to GSC name match or a pending placeholder and still create one website per property (regional props must not collapse by host).
+
+- **2026-09-24** — Top-bar Website must stay an active dropdown relative to Client (never a static label for single-site). Generate Report form mirrors Client + Website and syncs session on change.
+
+- **2026-09-21** — P1 = Meta App Review / Google verify **ops** + Phase E code polish. Email “forgot password” stays deferred until mailer; logged-in change password is enough for admin. Staging vs prod OAuth = separate clients or matching redirect URIs — never invent scopes for App Review.
 
 - **2026-09-21** — Meta-only = create client + user-supplied website URL (Meta has none). `clients.origin` = first family only (never overwrite). New platforms = catalog.js row + open TEXT keys — no CHECK rewrite. Domain ACL later uses `websites.primary_domain` + stub `user_domain_access`.
 

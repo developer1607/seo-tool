@@ -116,6 +116,12 @@ function migrate() {
   getDb().exec(
     `CREATE INDEX IF NOT EXISTS idx_clients_origin ON clients(origin)`
   );
+  try {
+    const { ensureTable } = require('./google/trackedKeywords');
+    ensureTable();
+  } catch (e) {
+    console.error('website_gsc_keywords:', e.message || e);
+  }
   // Widen notifications.layer CHECK to include 'WEBSITE'
   if (tableExists('notifications')) {
     try {

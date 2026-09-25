@@ -15,6 +15,40 @@ Open this repo → run slash command **`/replicate-webastral`** (defined in `.cu
 
 ---
 
+## 2026-09-25 — AgencyAnalytics SEO sections (fillable data)
+
+### Goal
+Wire Overview + saved reports to AgencyAnalytics SEO template sections we can fill from GSC / GA4 / Ads / Meta.
+
+### Done
+- Overview sections: summary, goals, search visibility, keyword rankings, GSC top queries, GA4 traffic + source mix, conversions, paid, recommendations
+- Removed empty Phase 3 backlink / CWV / competitor tables from Overview
+- `/overview` and `/reports/:id` return `keywords`, `topQueries`, `trafficMix`
+- Report catalog: keywords = Phase 1, default on; tables render on saved report
+- Design ref doc points at `refrence-report-ui.html`
+- **AA light-report colours/pattern** on Overview (`.seo-report`) + green/red keyword deltas on saved reports
+- **Redo:** Overview = AgencyAnalytics **card grid** (stacked rankings + 2×2 + Visibility + gauges) via `seo-aa-dashboard.tsx` — matches screenshot layout, not document sections
+- Fixed Rankings chart height (Recharts); platforms + saved reports moved to `.aa-card` theme + AA chart colors
+
+### How (for replication)
+- Helpers: `buildKeywordRowsWithCompare`, `buildTopQueries`, `buildTrafficMix` in `src/lib/google/trackedKeywords.js`
+- API: `seoReportExtras()` in `src/routes/api.js`
+- UI: `web/app/page.tsx`, `web/app/reports/[id]/page.tsx`; catalog sync `src/lib/reports.js` + `web/lib/report-sections.ts`
+- Styles: `.seo-report*` block in `web/app/globals.css`; ref shots under `docs/design-mocks/ref-shots/`
+
+### Checklist impact
+- Dashboards & reports → Overview AA-style + keyword/top-query tables Done (`ACCOUNT_INTEGRATIONS_PLAN.md`)
+
+### Smoke
+- Pick website with synced GSC → `/` keyword + top query tables populate
+- Generate report with defaults → open report → Keyword rankings + GSC top queries
+
+### Do not
+- Backlinks / SERP features / site audit / competitor pack (no connectors yet)
+- GA4 organic-only channel filter (still all-channel sessions)
+
+---
+
 ## How to write an entry (every shipping day)
 
 ```markdown
@@ -41,6 +75,294 @@ One sentence.
 ```
 
 **Rule:** Update this file the same turn as the checklist when something ships. Newest entry at the **top** (below this header).
+
+---
+
+## 2026-09-25 — GSC top-10 + custom keywords
+
+### Goal
+Cap Search Console keywords to top 10 and let users add/remove custom tracked keywords.
+
+### Done
+- Auto keywords capped at 10 (sync payload + platform table)
+- `website_gsc_keywords` table: `custom` (track) / `hidden` (suppress auto)
+- APIs: `POST/DELETE /api/platforms/gsc/keywords`
+- GSC platform UI: add form + Remove per row; custom badge
+- Sync pulls metrics for custom keywords via GSC query filters
+
+### How (for replication)
+- `src/lib/google/trackedKeywords.js`, `gsc.js`, `sync.js`
+- `src/routes/api.js` platform gsc keyword routes
+- `web/app/components/platform-page.tsx` + `globals.css`
+- Schema: `db/schema.postgres.sql` (+ legacy `schema.sql`); `migrate()` calls `ensureTable()`
+
+### Checklist impact
+- Polish under GSC platform UX (no new Phase gate)
+
+### Smoke
+- Open `/platforms/gsc` → confirm ≤10 auto rows → Add a custom keyword → Remove it → Remove an auto row (hides) → Sync header and confirm custom metrics return after re-add
+
+### Do not
+- Overview “Keyword ranking update” Phase 3 placeholder unchanged
+
+---
+
+## 2026-09-24 — Same GA4 account → one client
+
+### Goal
+Stop creating a separate client for each GA4 property under the same Analytics account.
+
+### Done
+- Single / bulk GA4 import attaches sibling properties as websites on the existing client for that account.
+- UI: “Add as website”; passes `ga4_account_id`; client name uses account name.
+- Prefer **Import client with all websites** for multi-property accounts.
+
+### How (for replication)
+- `src/lib/google/importAsset.js` — `findClientIdForGa4Account`, `uniquifyWebsiteUrl`.
+- `src/routes/google.js` + `web/app/integrations/google-inventory.tsx`.
+
+### Smoke
+- Import one Dingbats property → then Add as website on a second → same client, two websites.
+- Or Import client with all websites (5) → one client, five websites.
+
+### Do not
+- Does not auto-merge already-duplicated clients; delete extras manually if needed.
+
+---
+
+## 2026-09-24 — GA4 import without web stream URL
+
+### Goal
+Allow “Import client with all websites” when GA4 properties have no `defaultUri` (e.g. Dingbats regional properties).
+
+### Done
+- URL resolve order: web stream → GSC domain/name match → unique `ga4-pending.local` placeholder.
+- Account import creates **one website per GA4 property** (no host collapse for regional props).
+- Inventory copy clarifies missing stream URL does not block import.
+
+### How (for replication)
+- `src/lib/google/resourceMatch.js` — `findGscByNameTokens`, `placeholderWebsiteUrl`.
+- `src/lib/google/importAsset.js` — `resolveGa4WebsiteUrl`, `findWebsiteByGa4Property`.
+- `web/app/integrations/google-inventory.tsx` — label text.
+
+### Smoke
+- Integrations → Dingbats Notebooks → Import client with all websites (5) → Client Details shows 5 websites; GA4 links ACTIVE.
+
+### Do not
+- No schema change (Client → many Websites already supported).
+
+---
+
+## 2026-09-24 — Client/website switcher always active
+
+### Goal
+Make Website an active dropdown relative to Client (top bar + Generate Report) so multi-site clients are easy to switch.
+
+### Done
+- Top-bar Website is always a `<select>` for the selected client (no longer a static label for single-site clients).
+- Generate Report form has Client + Website side by side; changing Client loads that client's sites and updates session.
+- Form stays in sync with top-bar selection.
+
+### How (for replication)
+- `web/app/components/client-website-switcher.tsx` — always render website select from session `websites`.
+- `web/app/reports/generate/page.tsx` — website field + `selectClient` / `selectWebsite` on change.
+- `web/app/globals.css` — drop unused `.topbar-context-static`.
+
+### Smoke
+- Workspace → Generate Report → change Client → Website list updates → switch Website → preview URL updates.
+- Top bar: pick a multi-website client → Website dropdown lists all URLs.
+
+### Do not
+- No API/schema change.
+
+---
+
+## 2026-09-24 — Multi-site Google account import
+
+### Goal
+Import one GA4 account as one client with multiple websites/properties, while keeping Overview/platform/report pages website-scoped.
+
+### Done
+- GA4 discover now exposes account groups with `accounts/{id}`, properties, and stream URLs.
+- Shared ID/domain-first matching for GA4, Search Console, and Ads.
+- New `POST /integrations/google/import-account` creates/updates one client and links all selected properties as websites.
+- Integrations Google inventory shows GA4 grouped by account with **Import client with all websites**.
+- Platform/report pages stay on `selectedWebsite`; Client Details remains the multi-website rollup.
+
+### How (for replication)
+- `src/lib/google/ga4.js` — `listGa4AccountGroups`, account/property IDs, stream URLs.
+- `src/lib/google/resourceMatch.js` — domain/ID scoring helpers.
+- `src/lib/google/importAsset.js` — `importGoogleAccount`.
+- `src/routes/google.js` — discover `ga4Accounts` + import-account route.
+- `web/app/integrations/google-inventory.tsx` — account-grouped import UI.
+
+### Smoke
+- Integrations → Google → open GA4 accounts → Import client with all websites.
+- Client Details shows each website; top website dropdown switches Overview/GA4/GSC/Ads context.
+
+---
+
+## 2026-09-24 — Complete Google ID-based discovery
+
+### Goal
+Make Google discovery consistent across GA4, Search Console, and Ads: IDs are the source of truth, names are display only, and large account inventories are not cut off.
+
+### Done
+- GA4 discovery now paginates all account summaries and data streams, so later-page properties like CRG are listed.
+- Search Console continues to use `siteUrl` as the stable ID and permission source.
+- Google Ads discovery no longer stops at the first 40 accessible customers; normalized customer IDs remain the stored key.
+
+### How (for replication)
+- `src/lib/google/ga4.js` — paginate `accountSummaries.list` and `properties.dataStreams.list`.
+- `src/lib/google/ads.js` — remove the first-40 cap and discover all accessible direct/MCC child accounts with bounded concurrency.
+- Client labels continue to show name plus ID; matching still prefers exact domain/stream URL first.
+
+### Smoke
+- Saved agency token `searcheno1@gmail.com` returns CRG GA4 `properties/533768888`, CRG GSC `https://www.crgtraffic.com.au/`, and Ads inventory without error.
+
+---
+
+## 2026-09-24 — Agency-only Google data access
+
+### Goal
+Simplify integrations: manual clients stay, but Google reporting data comes from agency/admin Google access only.
+
+### Done
+- Removed website-local/client Google OAuth entry points from the Integrations UI.
+- Hid multi-Google add-account controls; Google inventory now presents one agency Google access path.
+- Backend rejects stale `force=1` / `local=1` Google starts and old local-only callback states.
+- Synced connections that were stale `PENDING_SELECT` now self-heal to `ACTIVE` when platform status is read.
+- Header Sync now refreshes same-domain Google access from the saved agency OAuth token before syncing active Google/Meta data into snapshots.
+- Google providers with no selected/matching resource now display as `ACCESS_NOT_GIVEN` instead of misleading `PENDING_SELECT`.
+- Client Details now has inline Google resource dropdowns with names and IDs, so sync/access fixes happen on the client page instead of redirecting to Integrations.
+- Google and Meta remain reporting providers; Meta account management stays available.
+
+### How (for replication)
+- `web/app/integrations/website-bindings.tsx` — only “Use agency Google” remains for website Google resources.
+- `web/app/integrations/google-inventory.tsx` and `web/app/integrations/integrations-inner.tsx` — single agency Google copy/actions.
+- `src/routes/google.js` — local website Google OAuth guard.
+- `src/lib/clients.js` — status self-heal for previously synced pending connections.
+- `web/app/components/admin-shell.tsx` — header Sync calls the combined access-refresh + data-sync endpoint.
+
+### Checklist impact
+- Google model changed from agency-or-local fallback to agency-only data access.
+
+### Smoke
+- `/integrations` → Google shows Connect/Manage/Reconnect agency Google only; no “Connect this site’s Google” or “Add Google account”.
+- Manually add/select a client → Website links → Use agency Google → choose matching GA4/GSC/Ads → sync.
+
+### Do not
+- Remove Meta reporting access; keep Meta provider UI.
+
+---
+
+## 2026-09-24 — Google import syncs companion access
+
+### Goal
+When a client is imported from Search Console or GA4, bring in the matching Google access and Search Console keywords by default.
+
+### Done
+- GSC import now best-effort matches GA4 by website hostname and links it to the same website.
+- Google imports now sync every active Google provider on the website after companion links are activated.
+- Website-level Google resource picker now prefers current/same-domain matches and leaves unrelated first-row accounts unselected.
+- Saving GA4/GSC from the website picker now best-effort activates the same-domain companion before syncing all active Google sources.
+- GSC keyword rows continue to come from synced Search Console query payloads.
+
+### How (for replication)
+- `src/lib/google/importAsset.js` — companion GA4/GSC discovery plus one combined website Google sync after import.
+- `src/lib/google/sync.js` — `syncAvailableGoogleProviders()` for active Google connections on a website.
+
+### Checklist impact
+- Google data path expanded: Import GA4/GSC now syncs available companion access in one pass.
+
+### Smoke
+- Integrations → Google → Import a Search Console property with a matching GA4 web stream → open `/platforms/gsc` and verify KPIs + Top keywords; open GA4 and verify rows are synced.
+
+### Do not
+- Auto-link Ads by guess; Ads still needs explicit website/account confirmation.
+
+---
+
+## 2026-09-21 — P1 ops runbook + Phase E auth polish
+
+### Goal
+Start P1: Meta App Review / Google verify operator path + Phase E login rate limit and change password.
+
+### Done
+- Runbook: `docs/03-qa/01-alpha/P1_OPS_AND_POLISH.md` (Meta BV/App Review, Google verification, staging vs prod OAuth)
+- Login rate limit (8 / 15 min / IP) on `POST /api/login` and EJS `POST /login`
+- `POST /api/account/password` + Settings → Change password (logged-in; email reset deferred)
+- `.env.example` note for staging/prod redirect URIs
+
+### How (for replication)
+- `src/lib/rateLimit.js` — in-memory sliding window; `rateLimitMiddleware` + `take`/`clientKey`
+- Settings form posts `{ current_password, new_password }` (min 10)
+- Human Calendar items stay unchecked in master checklist until Consoles complete
+
+### Checklist impact
+- P1 Phase E → **[~]** (rate limit + change password Done; email reset + OAuth ops open)
+- Phase D ops / Google verify still open (runbook only)
+- `PHASES.md` Phase E row updated
+
+### Smoke
+- Fail login 9× → 429 message
+- Settings → Update password → logout → login with new password
+- Open P1 runbook §1–§3 and tick Console work as you go
+
+### Do not
+- Email “forgot password” mailer
+- Meta App Review submission from code (ops only)
+- Employee ACL UI / cron Sync
+
+---
+
+## 2026-09-21 — Meta KPI verify (import + wider backfill)
+
+### Goal
+Confirm Meta Console redirect string, import a real spent ad account, prove KPI JSON + snapshots.
+
+### Done
+- Redirect to paste: `http://localhost:3000/auth/meta/callback`
+- Root cause of “empty Meta”: sync used last_30 while spend was older — Meta import now backfills **last_365**; default Meta sync **last_90**; presets `last_90` / `last_365` added
+- Insights store `reach` + `payload_json` (actions/cpc/cpm)
+- Imported **Anayiah Grewal** (`act_2009020426510342`) → client **18** origin **META** → **208** snapshot days, spend **~$2262**, imps **7.1M**, clicks **296k**
+- `/api/platforms/meta?preset=last_365` returns full KPI set (spend, imps, clicks, reach, ctr, cpc, cpm) + daily rows with action JSON
+
+### Still human
+- Meta Developer Console: paste redirect URI + add tester roles
+- UI: open client 18 → Meta → select Last 365 days
+
+---
+
+
+### Goal
+Execute P0: confirm Meta localhost redirect, document durable Postgres, baseline API/browser smoke, give humans a pass sheet.
+
+### Done
+- Local Meta redirect: code + `.env` = `http://localhost:3000/auth/meta/callback`
+- Runbook: `docs/03-qa/01-alpha/P0_TESTER_AND_DEPLOY.md`
+- Alpha deploy notes switched from SQLite volume → **managed Postgres**
+- `smoke:pg` **25/25**; login page browser smoke (Webastral title)
+
+### Still human
+- Meta Developer Console URI + app-role testers
+- Full tester table (Create client & link, origin badges, PDF)
+- Provision managed Postgres + staging OAuth redirects
+
+---
+
+
+### Goal
+Reconcile master checklist with everything shipped (incl. Meta-only + provenance) and write a clear next approach for testers.
+
+### Done
+- Rewrote top of `ACCOUNT_INTEGRATIONS_PLAN.md`: grouped Done, P0–P3 Pending, **Next approach**, expanded smoke (Meta create+link + origin keep)
+- Updated `PHASES.md` (Phase D + Phase 1b provenance)
+
+### Checklist impact
+- On-visit Sync moved fully under Done (was wrongly sitting in Pending)
+- New P0: internal tester pass + Meta redirect confirm + prod Postgres
+- Explicit: do not build employee portal / LinkedIn / cron until tester + App Review path is moving
 
 ---
 

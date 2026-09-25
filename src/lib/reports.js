@@ -62,9 +62,9 @@ const REPORT_SECTIONS = [
   {
     id: 'keywords',
     label: 'Keyword rankings',
-    description: 'Requires rank tracking (Phase 3)',
-    phase: 3,
-    defaultOn: false,
+    description: 'Top + tracked Search Console queries with position change',
+    phase: 1,
+    defaultOn: true,
   },
   {
     id: 'backlinks',
@@ -93,9 +93,9 @@ const REPORT_SECTIONS = [
 const NUMBERED_BODY_IDS = [
   'key_wins',
   'keywords',
-  'backlinks',
   'gsc',
   'ga4',
+  'backlinks',
   'technical',
   'competitors',
   'recommendations',

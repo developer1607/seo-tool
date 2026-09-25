@@ -6,6 +6,15 @@ import { useParams, useRouter } from "next/navigation";
 import AdminShell, { PageHeader } from "../../components/admin-shell";
 import TrendBadge from "../../components/trend-badge";
 import ReportKpiChart from "../../components/report-kpi-chart";
+import SeoAaDashboard, {
+  type HeroPayload,
+  type RankingPoint,
+} from "../../components/seo-aa-dashboard";
+import {
+  AaChartMeta,
+  KEYWORD_TABLE_EXPLAIN,
+  RANK_BUCKET_LEGEND,
+} from "../../components/aa-chart-meta";
 import { api } from "../../../lib/api";
 import { useSession } from "../../providers";
 import {
@@ -24,6 +33,33 @@ import {
 type SourceBlock = {
   kpis: Record<string, number | null>;
   compare: Record<string, number | null>;
+};
+
+type KeywordRow = {
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  avg_position: number | null;
+  prev_position?: number | null;
+  position_change?: number | null;
+  origin?: string;
+};
+
+type TopQueryRow = {
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  avg_position: number | null;
+};
+
+type TrafficMixRow = {
+  channel: string;
+  metric: string;
+  value: number;
+  conversions: number | null;
+  source: string;
 };
 
 type SeriesPoint = { date: string; [key: string]: string | number };
@@ -50,6 +86,11 @@ type ReportDetail = {
   compare: Record<string, number>;
   gsc?: SourceBlock;
   ga4?: SourceBlock;
+  keywords?: KeywordRow[];
+  topQueries?: TopQueryRow[];
+  trafficMix?: TrafficMixRow[];
+  rankingSeries?: RankingPoint[];
+  hero?: HeroPayload;
   series?: SeriesBuckets;
   compareSeries?: SeriesBuckets;
   pie?: PieMap;
@@ -78,6 +119,18 @@ function fmt(n: number | null | undefined, digits = 0) {
   const v = Number(n) || 0;
   if (digits) return v.toFixed(digits);
   return String(Math.round(v));
+}
+
+function fmtPos(n: number | null | undefined) {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return fmt(n, 1);
+}
+
+function fmtChange(n: number | null | undefined) {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  const v = Number(n);
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${fmt(v, 1)}`;
 }
 
 function shortName(name: string) {
@@ -109,16 +162,18 @@ function Section({
   className?: string;
 }) {
   return (
-    <section className={`report-section${className ? ` ${className}` : ""}`}>
-      <header className="report-section-head">
-        <h2>
-          {n != null && n !== "" ? (
-            <span className="report-section-num">{n}</span>
-          ) : null}
-          {title}
-        </h2>
+    <section className={`aa-card aa-report-section${className ? ` ${className}` : ""}`}>
+      <header className="aa-card-head">
+        {n != null && n !== "" ? (
+          <span className="aa-card-icon">{n}</span>
+        ) : (
+          <span className="aa-card-icon" aria-hidden>
+            ▮
+          </span>
+        )}
+        <span className="aa-card-title">{title}</span>
       </header>
-      <div className="report-section-body">{children}</div>
+      <div className="aa-card-body">{children}</div>
     </section>
   );
 }
@@ -161,7 +216,7 @@ function KpiChartGrid({
 }) {
   const defs = REPORT_KPI_DEFS.filter((d) => d.section === section);
   const color =
-    tone === "gsc" ? "#e68a58" : tone === "ga4" ? "#58ae91" : "#6658d3";
+    tone === "gsc" ? "#f08a24" : tone === "ga4" ? "#12b76a" : "#2f6fed";
   const thisLabel = data.report.range_from
     ? `${data.report.range_from.slice(5)}–${data.report.range_to.slice(5)}`
     : "This period";
@@ -171,7 +226,7 @@ function KpiChartGrid({
       : "Prior period";
 
   return (
-    <div className={`report-kpi-chart-grid tone-${tone}`}>
+    <div className={`aa-report-kpi-grid tone-${tone}`}>
       {defs.map((def) => {
         const { value, cur, prev } = kpiValue(def, data);
         const chart = (chartTypes[def.key] ||
@@ -182,28 +237,50 @@ function KpiChartGrid({
         const hasCompare =
           (Number(prev) || 0) > 0 || (Number(cur) || 0) > 0;
         return (
-          <article className="report-kpi report-kpi-with-chart" key={def.key}>
-            <span className="report-kpi-label">{def.label}</span>
-            <strong className="report-kpi-value">{value}</strong>
-            <div className="report-kpi-trend">
+          <article className="aa-card aa-report-kpi" key={def.key}>
+            <header className="aa-card-head">
+              <span className="aa-card-icon" aria-hidden>
+                ▮
+              </span>
+              <span className="aa-card-title">{def.label}</span>
+            </header>
+            <strong className="aa-report-kpi-value">{value}</strong>
+            <div className="aa-mini-trend">
               {hasCompare && (prev > 0 || cur > 0) ? (
                 <>
                   <TrendBadge cur={cur} prev={prev} />
-                  <span>vs {priorLabel}</span>
+                  <span className="muted"> vs {priorLabel}</span>
                 </>
               ) : (
                 <span className="muted">Comparison unavailable</span>
               )}
             </div>
-            <ReportKpiChart
-              def={def}
-              chart={chart}
-              series={series}
-              compareSeries={compareSeries}
-              pie={data.pie?.[def.key]}
-              color={color}
-              thisLabel={thisLabel}
-              priorLabel={priorLabel}
+            <div className="aa-report-kpi-chart">
+              <ReportKpiChart
+                def={def}
+                chart={chart}
+                series={series}
+                compareSeries={compareSeries}
+                pie={data.pie?.[def.key]}
+                color={color}
+                thisLabel={thisLabel}
+                priorLabel={priorLabel}
+              />
+            </div>
+            <AaChartMeta
+              items={[
+                {
+                  color,
+                  label: def.label,
+                  meaning: `${def.label} trend for this reporting period`,
+                },
+                {
+                  color: "#b9c0cc",
+                  label: priorLabel,
+                  meaning: "Matching prior-period benchmark (dashed / secondary series)",
+                },
+              ]}
+              explain="Chart compares this period to the prior window of the same length."
             />
           </article>
         );
@@ -305,7 +382,7 @@ export default function ReportDetailPage() {
 
   return (
     <AdminShell title="Report">
-      <div className="page-content report-page">
+      <div className="page-content report-page aa-page">
         <div className="no-print">
           <PageHeader
             eyebrow="SEO PERFORMANCE REPORT"
@@ -342,7 +419,7 @@ export default function ReportDetailPage() {
         )}
 
         {data && (
-          <article className="report-doc" style={reportStyle}>
+          <article className="report-doc aa-report-doc" style={reportStyle}>
             <div className="report-brand-bar" aria-hidden />
 
             {on.cover && (
@@ -387,12 +464,21 @@ export default function ReportDetailPage() {
               </section>
             )}
 
+            {(on.key_wins || on.keywords || on.gsc) && data.hero ? (
+              <div style={{ padding: "16px 16px 0" }}>
+                <SeoAaDashboard
+                  rankingSeries={data.rankingSeries || []}
+                  hero={data.hero}
+                />
+              </div>
+            ) : null}
+
             {on.key_wins && (
-              <Section n={sn.key_wins} title="Objectives & key wins">
+              <Section n={sn.key_wins} title="SEO report summary">
                 <p className="report-lead">
                   Headline KPIs vs the prior matching period. Charts overlay{" "}
                   <strong>this period</strong> and the <strong>benchmark</strong>{" "}
-                  (same length immediately before) day-by-day.
+                  day-by-day.
                 </p>
                 <KpiChartGrid
                   section="key_wins"
@@ -404,11 +490,74 @@ export default function ReportDetailPage() {
             )}
 
             {on.keywords && (
-              <Section n={sn.keywords} title="Keyword ranking update">
-                <div className="report-placeholder">
-                  Keyword ranking detail for this period will appear here once
-                  tracking is connected for your site.
-                </div>
+              <Section n={sn.keywords} title="Keyword rankings">
+                <p className="report-lead">
+                  Tracked keywords and top Search Console queries. Positive
+                  change means the query moved up in average position.
+                </p>
+                {(data.keywords || []).length === 0 ? (
+                  <div className="report-placeholder">
+                    No query rows for this period yet. Connect Search Console,
+                    Sync, then optionally track keywords on the Search Console
+                    channel.
+                  </div>
+                ) : (
+                  <div className="report-table-wrap">
+                    <table className="report-table">
+                      <thead>
+                        <tr>
+                          <th>Keyword</th>
+                          <th>Clicks</th>
+                          <th>Impr.</th>
+                          <th>Prev. pos</th>
+                          <th>Current</th>
+                          <th>Change</th>
+                          <th>Type</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(data.keywords || []).map((k) => (
+                          <tr key={k.query}>
+                            <td>{k.query}</td>
+                            <td>{fmt(k.clicks)}</td>
+                            <td>{fmt(k.impressions)}</td>
+                            <td>{fmtPos(k.prev_position)}</td>
+                            <td>{fmtPos(k.avg_position)}</td>
+                            <td>
+                              <span
+                                className={`seo-delta ${
+                                  k.position_change == null
+                                    ? "flat"
+                                    : k.position_change > 0.05
+                                      ? "up"
+                                      : k.position_change < -0.05
+                                        ? "down"
+                                        : "flat"
+                                }`}
+                              >
+                                {k.position_change != null &&
+                                k.position_change > 0.05
+                                  ? "▲ "
+                                  : k.position_change != null &&
+                                      k.position_change < -0.05
+                                    ? "▼ "
+                                    : ""}
+                                {fmtChange(k.position_change)}
+                              </span>
+                            </td>
+                            <td>
+                              {k.origin === "custom" ? "Tracked" : "Top"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <AaChartMeta
+                  items={RANK_BUCKET_LEGEND}
+                  explain={KEYWORD_TABLE_EXPLAIN}
+                />
               </Section>
             )}
 
@@ -422,24 +571,99 @@ export default function ReportDetailPage() {
             )}
 
             {on.gsc && (
-              <Section n={sn.gsc} title="Google Search Console update">
+              <Section n={sn.gsc} title="Google Search Console performance">
                 <KpiChartGrid
                   section="gsc"
                   tone="gsc"
                   data={data}
                   chartTypes={chartTypes}
                 />
+                <p className="report-lead" style={{ marginTop: 16 }}>
+                  Top queries by clicks
+                </p>
+                {(data.topQueries || []).length === 0 ? (
+                  <div className="report-placeholder">
+                    Top queries appear after GSC sync stores query breakdowns.
+                  </div>
+                ) : (
+                  <div className="report-table-wrap">
+                    <table className="report-table">
+                      <thead>
+                        <tr>
+                          <th>Query</th>
+                          <th>Clicks</th>
+                          <th>Impressions</th>
+                          <th>CTR</th>
+                          <th>Position</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(data.topQueries || []).map((q) => (
+                          <tr key={q.query}>
+                            <td>{q.query}</td>
+                            <td>{fmt(q.clicks)}</td>
+                            <td>{fmt(q.impressions)}</td>
+                            <td>{fmt(q.ctr, 1)}%</td>
+                            <td>{fmtPos(q.avg_position)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <AaChartMeta
+                  explain={[
+                    "Query — search term from Google Search Console",
+                    "CTR — clicks ÷ impressions for that query",
+                    "Pos — average ranking position (lower is better)",
+                  ]}
+                />
               </Section>
             )}
 
             {on.ga4 && (
-              <Section n={sn.ga4} title="Google Analytics (GA4) update">
+              <Section n={sn.ga4} title="Website traffic (GA4)">
                 <KpiChartGrid
                   section="ga4"
                   tone="ga4"
                   data={data}
                   chartTypes={chartTypes}
                 />
+                {(data.trafficMix || []).length > 0 ? (
+                  <>
+                    <p className="report-lead" style={{ marginTop: 16 }}>
+                      Channel mix from connected sources
+                    </p>
+                    <div className="report-table-wrap">
+                      <table className="report-table">
+                        <thead>
+                          <tr>
+                            <th>Channel</th>
+                            <th>Metric</th>
+                            <th>Value</th>
+                            <th>Conversions</th>
+                            <th>Source</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(data.trafficMix || []).map((r) => (
+                            <tr key={r.channel}>
+                              <td>{r.channel}</td>
+                              <td>{r.metric}</td>
+                              <td>{fmt(r.value)}</td>
+                              <td>
+                                {r.conversions != null
+                                  ? fmt(r.conversions)
+                                  : "—"}
+                              </td>
+                              <td>{r.source}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : null}
               </Section>
             )}
 

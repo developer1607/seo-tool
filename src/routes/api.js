@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
@@ -48,9 +48,35 @@ const {
   unlinkGoogleLogin,
 } = require('../lib/auth/identities');
 const { agencyMetaStatus } = require('../lib/meta/agency');
+const { rateLimitMiddleware } = require('../lib/rateLimit');
 const { overviewAdmin, overviewClient } = require('../lib/metrics/views');
+const {
+  buildKeywordRowsWithCompare,
+  buildTopQueries,
+  buildTrafficMix,
+  buildRankingSeries,
+  buildDashboardHero,
+} = require('../lib/google/trackedKeywords');
 
 const router = express.Router();
+
+function seoReportExtras(websiteId, current, prior, sourceBlocks, kpis, compare) {
+  const gscRows = current.bySource.gsc || [];
+  const priorGsc = prior.bySource.gsc || [];
+  const keywords = buildKeywordRowsWithCompare(gscRows, priorGsc, websiteId);
+  return {
+    keywords,
+    topQueries: buildTopQueries(gscRows, 15),
+    trafficMix: buildTrafficMix({
+      gsc: sourceBlocks.gsc?.kpis,
+      ga4: sourceBlocks.ga4?.kpis,
+      ads: sourceBlocks.ads?.kpis,
+      meta: sourceBlocks.meta?.kpis,
+    }),
+    rankingSeries: buildRankingSeries(gscRows),
+    hero: buildDashboardHero(keywords, sourceBlocks, kpis, compare),
+  };
+}
 
 function requireAuth(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
@@ -149,27 +175,58 @@ router.get('/session', (req, res) => {
   res.json(sessionPayload(req));
 });
 
-router.post('/login', (req, res) => {
-  const email = String(req.body.email || '')
-    .trim()
-    .toLowerCase();
-  const password = String(req.body.password || '');
-  const user = getDb()
-    .prepare(`SELECT * FROM users WHERE email = ? AND role = 'ADMIN'`)
-    .get(email);
-  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    return res.status(401).json({ error: 'Invalid Admin email or password.' });
+router.post(
+  '/login',
+  rateLimitMiddleware({
+    limit: 8,
+    windowMs: 15 * 60 * 1000,
+    suffix: 'login',
+    message: 'Too many sign-in attempts. Wait a few minutes and try again.',
+  }),
+  (req, res) => {
+    const email = String(req.body.email || '')
+      .trim()
+      .toLowerCase();
+    const password = String(req.body.password || '');
+    const user = getDb()
+      .prepare(`SELECT * FROM users WHERE email = ? AND role = 'ADMIN'`)
+      .get(email);
+    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Invalid Admin email or password.' });
+    }
+    const first = getDb().prepare(`SELECT id FROM clients ORDER BY name LIMIT 1`).get();
+    req.user = { id: user.id, email: user.email, name: user.name, role: user.role };
+    req.selectedClient = first ? getClient(first.id) : null;
+    req.selectedWebsite = first ? listWebsites(first.id)[0] || null : null;
+    writeSession(res, req, first?.id || null, req.selectedWebsite?.id || null);
+    res.json(sessionPayload(req));
   }
-  const first = getDb().prepare(`SELECT id FROM clients ORDER BY name LIMIT 1`).get();
-  req.user = { id: user.id, email: user.email, name: user.name, role: user.role };
-  req.selectedClient = first ? getClient(first.id) : null;
-  req.selectedWebsite = first ? listWebsites(first.id)[0] || null : null;
-  writeSession(res, req, first?.id || null, req.selectedWebsite?.id || null);
-  res.json(sessionPayload(req));
-});
-
+);
 router.post('/logout', (req, res) => {
   clearSession(res);
+  res.json({ ok: true });
+});
+
+router.post('/account/password', requireAuth, (req, res) => {
+  const current = String(req.body.current_password || '');
+  const next = String(req.body.new_password || '');
+  if (next.length < 10) {
+    return res
+      .status(400)
+      .json({ error: 'New password must be at least 10 characters.' });
+  }
+  const user = getDb()
+    .prepare(`SELECT id, password_hash FROM users WHERE id = ?`)
+    .get(req.user.id);
+  if (!user || !bcrypt.compareSync(current, user.password_hash)) {
+    return res.status(401).json({ error: 'Current password is incorrect.' });
+  }
+  const hash = bcrypt.hashSync(next, 10);
+  getDb()
+    .prepare(
+      `UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?`
+    )
+    .run(hash, req.user.id);
   res.json({ ok: true });
 });
 
@@ -252,6 +309,14 @@ router.get('/overview', requireAuth, requireClient, requireWebsite, (req, res) =
       kpis: current.kpis,
       compare: prior.kpis,
     });
+    const extras = seoReportExtras(
+      req.selectedWebsite.id,
+      current,
+      prior,
+      { gsc, ga4, ads, meta },
+      current.kpis,
+      prior.kpis
+    );
     res.json({
       range,
       presets: PRESETS,
@@ -261,6 +326,11 @@ router.get('/overview', requireAuth, requireClient, requireWebsite, (req, res) =
       ga4,
       ads,
       meta,
+      keywords: extras.keywords,
+      topQueries: extras.topQueries,
+      trafficMix: extras.trafficMix,
+      rankingSeries: extras.rankingSeries,
+      hero: extras.hero,
       summary,
       catalog: REPORT_SECTIONS,
       platforms: platformsForReq(req),
@@ -301,11 +371,11 @@ router.get('/platforms/:key', requireAuth, requireClient, requireWebsite, (req, 
   const rows = (current.bySource[conf.bucket] || []).slice().sort((a, b) =>
     String(a.date).localeCompare(String(b.date))
   );
+  const compareRows = (prior.bySource[conf.bucket] || [])
+    .slice()
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const sourceKpis = summarizeSource(rows, conf.provider);
-  const compareSource = summarizeSource(
-    prior.bySource[conf.bucket] || [],
-    conf.provider
-  );
+  const compareSource = summarizeSource(compareRows, conf.provider);
   res.json({
     key: req.params.key,
     title: conf.title,
@@ -316,8 +386,92 @@ router.get('/platforms/:key', requireAuth, requireClient, requireWebsite, (req, 
     compare: compareSource,
     status,
     rows,
+    compareRows,
+    keywordRows:
+      req.params.key === 'gsc'
+        ? require('../lib/google/trackedKeywords').buildKeywordRows(
+            rows,
+            req.selectedWebsite.id
+          )
+        : undefined,
+    trackedKeywords:
+      req.params.key === 'gsc'
+        ? require('../lib/google/trackedKeywords').listCustomQueries(
+            req.selectedWebsite.id
+          )
+        : undefined,
   });
 });
+
+router.post(
+  '/platforms/gsc/keywords',
+  requireAuth,
+  requireClient,
+  requireWebsite,
+  (req, res) => {
+    try {
+      const {
+        addCustomKeyword,
+        buildKeywordRows,
+        TOP_AUTO,
+      } = require('../lib/google/trackedKeywords');
+      const added = addCustomKeyword(
+        req.selectedWebsite.id,
+        req.body?.query || req.body?.keyword
+      );
+      const range = resolvePreset(req.query.preset, req.query.from, req.query.to);
+      const current = buildKpis(req.selectedWebsite.id, range.from, range.to);
+      const rows = (current.bySource.gsc || []).slice();
+      res.json({
+        ok: true,
+        added,
+        keywordRows: buildKeywordRows(rows, req.selectedWebsite.id, TOP_AUTO),
+        trackedKeywords: require('../lib/google/trackedKeywords').listCustomQueries(
+          req.selectedWebsite.id
+        ),
+      });
+    } catch (e) {
+      res.status(e.status || 500).json({
+        error: e.message || 'Failed to add keyword',
+        code: e.code || 'KEYWORD_ADD_FAILED',
+      });
+    }
+  }
+);
+
+router.delete(
+  '/platforms/gsc/keywords',
+  requireAuth,
+  requireClient,
+  requireWebsite,
+  (req, res) => {
+    try {
+      const {
+        removeKeyword,
+        buildKeywordRows,
+        TOP_AUTO,
+      } = require('../lib/google/trackedKeywords');
+      const query = req.body?.query || req.body?.keyword || req.query.query;
+      const removed = removeKeyword(req.selectedWebsite.id, query);
+      const range = resolvePreset(req.query.preset, req.query.from, req.query.to);
+      const current = buildKpis(req.selectedWebsite.id, range.from, range.to);
+      const rows = (current.bySource.gsc || []).slice();
+      res.json({
+        ok: true,
+        removed,
+        keywordRows: buildKeywordRows(rows, req.selectedWebsite.id, TOP_AUTO),
+        trackedKeywords: require('../lib/google/trackedKeywords').listCustomQueries(
+          req.selectedWebsite.id
+        ),
+      });
+    } catch (e) {
+      res.status(e.status || 500).json({
+        error: e.message || 'Failed to remove keyword',
+        code: e.code || 'KEYWORD_REMOVE_FAILED',
+      });
+    }
+  }
+);
 
 function summarizeSource(rows, provider) {
   const sum = (field) =>
@@ -327,6 +481,7 @@ function summarizeSource(rows, provider) {
   const sessions = sum('sessions');
   const users = sum('users');
   const spend = sum('spend');
+  const reach = sum('reach');
   const primary_conversions = sum('primary_conversions');
   const primary_value = sum('primary_value');
   const engaged_sessions = sum('engaged_sessions');
@@ -352,6 +507,7 @@ function summarizeSource(rows, provider) {
     clicks,
     impressions,
     spend,
+    reach,
     sessions,
     users,
     engaged_sessions,
@@ -461,6 +617,29 @@ router.get('/reports/:id', requireAuth, (req, res) => {
         compare: prior.kpis,
       });
 
+    const gscBlock = { kpis: gscKpis, compare: gscCompare };
+    const ga4Block = { kpis: ga4Kpis, compare: ga4Compare };
+    const adsKpis = summarizeSource(
+      current.bySource.ads || [],
+      'GOOGLE_ADS'
+    );
+    const metaKpis = summarizeSource(
+      current.bySource.meta || [],
+      'META_ADS'
+    );
+    const extras = seoReportExtras(
+      site.id,
+      current,
+      prior,
+      {
+        gsc: gscBlock,
+        ga4: ga4Block,
+        ads: { kpis: adsKpis },
+        meta: { kpis: metaKpis },
+      },
+      current.kpis,
+      prior.kpis
+    );
     res.json({
       report: {
         ...report,
@@ -473,8 +652,13 @@ router.get('/reports/:id', requireAuth, (req, res) => {
       kpiCatalog: REPORT_KPI_DEFS,
       kpis: current.kpis,
       compare: prior.kpis,
-      gsc: { kpis: gscKpis, compare: gscCompare },
-      ga4: { kpis: ga4Kpis, compare: ga4Compare },
+      gsc: gscBlock,
+      ga4: ga4Block,
+      keywords: extras.keywords,
+      topQueries: extras.topQueries,
+      trafficMix: extras.trafficMix,
+      rankingSeries: extras.rankingSeries,
+      hero: extras.hero,
       series,
       compareSeries,
       pie,
